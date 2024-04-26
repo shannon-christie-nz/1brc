@@ -8,6 +8,9 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * e92283e54e6e6e930ff8500841a68a6c057f865c - Serial using streams, lines -> forEach. CHM -> forEach took ~135 seconds.
+ * */
 public class CalculateAverage_ShannonChristie {
     public static void main(String[] args) {
         Instant start = Instant.now();
