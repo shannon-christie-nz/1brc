@@ -19,7 +19,8 @@ import java.util.concurrent.TimeUnit;
  * 382743987775cd6ca97ee77cbfb20ee09ca8398b - 1r1w. RandomAccessFile + Memory Mapped v1. Took ~153 seconds.
  * a72fa41407128babb10a8f441f4f5a3b03f138ed - 1r1w. RandomAccessFile + Memory Mapped v1. Refactor. Took ~141 seconds.
  * f78d737d0181c1c42a1a067210da76d5701af7a7 - 1r1w. BufferedReader again. Took ~68 seconds.
- * 0fbbfdb2717a59fd25ce6f30721732ce4fde075a - 1r1w. BufferedReader, 1 million batches. Took ~91 seconds.
+ * 0fbbfdb2717a59fd25ce6f30721732ce4fde075a - 1r1w. BufferedReader, 1 million per batch. Took ~91 seconds.
+ * 4c3793c44cca3da29013138e19f09637465fef0a - 1r1w. BR, 10 million per batch. Took ~69 seconds.
  * */
 public class CalculateAverage_ShannonChristie {
     public static boolean readerHasFinished = false;
@@ -35,11 +36,10 @@ public class CalculateAverage_ShannonChristie {
         //////////////////////////
         /// Auto-configuration ///
         //////////////////////////
-//        Runtime runtime = Runtime.getRuntime();
-//        int cores = runtime.availableProcessors();
-        int cores = 1;
+        Runtime runtime = Runtime.getRuntime();
+        int cores = Math.max(1, runtime.availableProcessors() - 1);
 
-        LinkedBlockingQueue<ArrayList<String>> queue = new LinkedBlockingQueue<>(cores + 2);
+        LinkedBlockingQueue<ArrayList<String>> queue = new LinkedBlockingQueue<>(cores);
 
         Thread readerThread = new Thread(() -> {
             try (BufferedReader reader = Files.newBufferedReader(Path.of("./measurements.txt"))) {
