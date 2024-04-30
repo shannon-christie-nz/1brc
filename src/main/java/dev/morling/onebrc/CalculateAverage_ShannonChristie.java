@@ -1,10 +1,10 @@
 package dev.morling.onebrc;
 
-import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.nio.CharBuffer;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
@@ -182,15 +182,40 @@ public class CalculateAverage_ShannonChristie {
     }
 
     private static void readMeasurementsToQueue(int BATCH_SIZE, LinkedBlockingQueue<ArrayList<String>> queue, int READER_TIMEOUT, Instant start) {
-        try (BufferedReader reader = Files.newBufferedReader(Path.of("./measurements.txt"))) {
-            CharBuffer charBuffer = CharBuffer.allocate(BATCH_SIZE);
-            String carryOverLine = null;
+        try (RandomAccessFile reader = new RandomAccessFile("./measurements.txt", "r")) {
+            FileChannel fileChannel = reader.getChannel();
 
-            int read;
-            while ((read = reader.read(charBuffer)) != -1) {
+            // Read as memory mapped file
+            // Load a large buffer at once, let the reader find "chunks"
+            // which is the start offset and end offset which contains only
+            // complete lines.
+            //
+            // This ensures a worker won't get incomplete
+            // lines which complicate work sharing. i.e. if thread A
+            // gets half of line z and thread B gets the other half,
+            // how do we fix this? Without even more synchronisation
+            // or complicated data structures.
+            //
+            // Later, as we near the end of "chunks" for a memory mapped
+            // file. The reader must preload another portion of the file.
+            // The existing one is left while workers are still completing
+            // the "chunks" for it, but the new one is prepared so work
+            // is never blocked unnecessarily waiting on disk IO.
+            MappedByteBuffer mappedByteBuffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, 0, fileChannel.size());
+
+            mappedByteBuffer.load();
+
+            int index = 0;
+            while (index < mappedByteBuffer.capacity()) {
                 Instant readerStart = Instant.now();
 
-                ArrayList<String> lines = new ArrayList<>(BATCH_SIZE);
+                long batchStart = index * BATCH_SIZE;
+                long batchEnd = Math.min(batchStart + BATCH_SIZE, mappedByteBuffer.capacity());
+
+                // Walk backwards to find the last newline
+                for (int i = 0; i < 100; i++) {
+                    mappedByteBuffer.get(batchEnd - i - 1);
+                }
 
                 int lastRead = 0;
                 for (int i = 0; i < read; i++) {
@@ -235,6 +260,8 @@ public class CalculateAverage_ShannonChristie {
             readerHasFinished = true;
         }
     }
+
+    public static record BufferRange(long start, long end) {};
 
     public static class StationReport {
         private final String stationName;
