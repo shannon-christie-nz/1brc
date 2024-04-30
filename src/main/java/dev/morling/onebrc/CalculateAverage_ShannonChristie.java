@@ -28,7 +28,7 @@ public class CalculateAverage_ShannonChristie {
         /////////////////////
         /// Configuration ///
         /////////////////////
-        final int BATCH_SIZE = 100_000;
+        final int BATCH_SIZE = 100_000_000;
 
         //////////////////////////
         /// Auto-configuration ///
@@ -93,6 +93,8 @@ public class CalculateAverage_ShannonChristie {
                     }
 
                     currentIndex = lastReadIndex;
+
+                    mappedByteBuffer.clear();
 
                     System.out.printf("Reader: read %d lines in %.2f seconds\n", lines.size(), (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
                 }
