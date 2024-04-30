@@ -16,6 +16,7 @@ import java.util.stream.Stream;
 /**
  * e92283e54e6e6e930ff8500841a68a6c057f865c - Serial using streams, lines -> forEach. CHM -> forEach took ~135 seconds.
  * be07811561db261f029f42deb33a0c612f3a4b76 - Multithreaded processing v1 with serial preprocessing v0.1. Output mechanism incomplete. Dies on memory usage.
+ * 2b7a6e7b9fe6dce7fab14bc7ced015aa0a544248 - Multithreaded processing v2 with serial reader thread. Using blocking work queue. Output complete. No memory death. Took ~56 seconds
  * */
 public class CalculateAverage_ShannonChristie {
     public static boolean readerHasFinished = false;
