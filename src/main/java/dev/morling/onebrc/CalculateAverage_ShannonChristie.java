@@ -2,6 +2,7 @@ package dev.morling.onebrc;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.nio.CharBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -46,33 +47,46 @@ public class CalculateAverage_ShannonChristie {
 
         Thread readerThread = new Thread(() -> {
             try (BufferedReader reader = Files.newBufferedReader(Path.of("./measurements.txt"))) {
-                while (!readerHasFinished) {
-                    Instant readerStart = Instant.now();
+                Instant readerStart = Instant.now();
 
+                CharBuffer charBuffer = CharBuffer.allocate(BATCH_SIZE);
+                String carryOverLine = null;
+
+                int read;
+                while ((read = reader.read(charBuffer)) != -1) {
                     ArrayList<String> lines = new ArrayList<>(BATCH_SIZE);
-                    String newLine;
-                    while ((newLine = reader.readLine()) != null) {
-                        lines.add(newLine);
 
-                        if (lines.size() >= BATCH_SIZE) {
-                            break; // Create batches
+                    int lastRead = 0;
+                    for (int i = 0; i < read; i++) {
+                        if (charBuffer.get(i) == '\n') {
+                            CharBuffer lineBuffer = charBuffer.slice(lastRead, i - lastRead);
+
+                            if (carryOverLine == null) {
+                                lines.add(lineBuffer.toString());
+                            } else {
+                                lines.add(carryOverLine + lineBuffer.toString());
+                                carryOverLine = null;
+                            }
+
+                            lastRead = i + 1;
                         }
+                    }
+
+                    if (lastRead != read) {
+                        // We didn't complete a line
+                        carryOverLine = charBuffer.slice(lastRead, read - lastRead).toString();
                     }
 
                     System.out.printf("Reader: read %d lines in %.2f seconds\n", lines.size(), (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
 
-                    if (lines.isEmpty()) {
-                        System.out.printf("Reader: finished at %.2f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
-
-                        readerHasFinished = true;
-
-                        break;
-                    }
-
                     // If workers can't complete a batch in 20 seconds when we start to block
                     // something must've gone wrong.
                     queue.offer(lines, READER_TIMEOUT, TimeUnit.SECONDS);
+
+                    charBuffer.clear();
                 }
+
+                System.out.printf("Reader: finished at %.2f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
             } catch (IOException ex) {
                 System.err.println("Reader: error reading file");
 
