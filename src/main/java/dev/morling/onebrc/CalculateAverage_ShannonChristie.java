@@ -5,6 +5,7 @@ import java.io.RandomAccessFile;
 import java.nio.CharBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
@@ -57,15 +58,14 @@ public class CalculateAverage_ShannonChristie {
 
                     // Ensure it's in memory
                     mappedByteBuffer.load();
-                    CharBuffer bufferAsCharBuffer = mappedByteBuffer.asCharBuffer();
 
                     // Start the walk finding lines
-                    int currentReadLimit = bufferAsCharBuffer.limit();
+                    int currentReadLimit = mappedByteBuffer.limit();
                     int lastLineIndex = 0;
                     ArrayList<String> lines = new ArrayList<>(BATCH_SIZE);
                     for (int i = 0; i < currentReadLimit; i++) {
-                        if (bufferAsCharBuffer.get(i) == '\n') {
-                            CharBuffer lineBuffer = bufferAsCharBuffer.slice(lastLineIndex, i);
+                        if (mappedByteBuffer.get(i) == '\n') {
+                            CharBuffer lineBuffer = StandardCharsets.ISO_8859_1.decode(mappedByteBuffer.slice(lastLineIndex, i - lastLineIndex));
                             lastLineIndex = i + 1;
 
                             String newLine = lineBuffer.toString();
