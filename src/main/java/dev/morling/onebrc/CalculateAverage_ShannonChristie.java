@@ -2,42 +2,84 @@ package dev.morling.onebrc;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * e92283e54e6e6e930ff8500841a68a6c057f865c - Serial using streams, lines -> forEach. CHM -> forEach took ~135 seconds.
+ * be07811561db261f029f42deb33a0c612f3a4b76 - Multithreaded processing v1 with serial preprocessing v0.1. Output mechanism incomplete. Dies on memory usage.
  * */
 public class CalculateAverage_ShannonChristie {
+    public static boolean readerHasFinished = false;
+
     public static void main(String[] args) {
         Instant start = Instant.now();
 
-        ArrayList<LineToProcess> lineToProcess = readLinesToBeProcessed();
+        /////////////////////
+        /// Configuration ///
+        /////////////////////
+        final int BATCH_SIZE = 100_000;
 
-        System.out.printf(
-                "\nPreprocessed the data in %.4f",
-                (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0
-        );
-
+        //////////////////////////
+        /// Auto-configuration ///
+        //////////////////////////
         Runtime runtime = Runtime.getRuntime();
         int cores = runtime.availableProcessors();
 
-        final int BATCH_SIZE = 100_000;
-        final int BATCHES_PER_CORE = (lineToProcess.size() / BATCH_SIZE) / cores;
+        LinkedBlockingQueue queue = new LinkedBlockingQueue<ArrayList<String>>(cores + 2);
 
-        final int ITEMS_PER_CORE = BATCH_SIZE * BATCHES_PER_CORE;
+        Thread readerThread = new Thread(() -> {
+            try (BufferedReader reader = Files.newBufferedReader(Path.of("./measurements.txt"))) {
+                int currentIndex = 0; // Maintain "progress" of read
 
-        System.out.printf(
-                "\nGot %d cores with %d batches per core",
-                cores,
-                BATCHES_PER_CORE
-        );
+                Stream<String> linesStream = reader.lines();
+
+                while (!readerHasFinished) {
+                    final int offset = BATCH_SIZE * currentIndex++;
+
+                    System.out.printf("Reader: about to start at %d", offset);
+
+                    ArrayList<String> collect = linesStream
+                            .skip(offset) // Progress through the stream
+                            .limit(BATCH_SIZE)
+                            .collect(Collectors.toCollection(ArrayList::new));
+
+                    System.out.printf("Reader: completed read at %d for %d lines", offset, collect.size());
+
+                    // If workers can't complete a batch in 20 seconds when we start to block
+                    // something must've gone wrong.
+                    queue.offer(collect, 20, TimeUnit.SECONDS);
+
+                    if (collect.size() < BATCH_SIZE) { // We've clearly reached the end of the file
+                        readerHasFinished = true;
+                    }
+                }
+            } catch (IOException ex) {
+                System.err.println("Reader: error reading file");
+
+                System.err.println(ex.getMessage());
+            } catch (InterruptedException ex) {
+                System.err.println("Reader: workers couldn't process fast enough, we timed out at 20 seconds");
+
+                System.err.println(ex.getMessage());
+            } finally {
+                readerHasFinished = true;
+            }
+        });
+
+        readerThread.start();
+
+        System.out.println("Reader thread started");
+
+
 
         CountDownLatch threadProcessingCompletionLatch = new CountDownLatch(cores);
 
@@ -45,7 +87,7 @@ public class CalculateAverage_ShannonChristie {
                 new ArrayList<>(cores);
 
         for (int i = 0; i < cores; i++) {
-            processedLines.add(new ArrayList<>(ITEMS_PER_CORE));
+            processedLines.add(new ArrayList<>(BATCH_SIZE));
 
             final int THREAD_INDEX = i;
             final int OFFSET = i * BATCH_SIZE;
@@ -111,26 +153,6 @@ public class CalculateAverage_ShannonChristie {
         });
 
         System.out.printf("\nTook %.4f", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
-    }
-
-    private static ArrayList<LineToProcess> readLinesToBeProcessed() {
-        ArrayList<LineToProcess> lineToProcesses = new ArrayList<>(1_000_000_000);
-
-        try (BufferedReader bufferedReader = Files.newBufferedReader(
-                Path.of("./measurements.txt"),
-                StandardCharsets.UTF_8)) {
-
-            bufferedReader
-                    .lines()
-                    .forEach(line -> lineToProcesses.add(new LineToProcess(line.indexOf(';'), line)));
-
-        } catch (IOException ex) {
-            System.err.printf("\nSomething went horribly wrong. Err: %s", ex.getMessage());
-
-            throw new RuntimeException(ex);
-        }
-
-        return lineToProcesses;
     }
 
     public static record LineToProcess(int delimiterIndex, String line) {}
