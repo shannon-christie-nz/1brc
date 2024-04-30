@@ -119,19 +119,14 @@ public class CalculateAverage_ShannonChristie {
 
         CountDownLatch threadProcessingCompletionLatch = new CountDownLatch(cores);
 
-        ArrayList<ConcurrentHashMap<String, StationReportAccumulator>> inProgressReportAccumulators =
-                new ArrayList<>(cores);
         ArrayList<ConcurrentHashMap<String, StationReport>> inProgressReports = new ArrayList<>(cores);
 
         for (int i = 0; i < cores; i++) {
-            inProgressReportAccumulators.add(new ConcurrentHashMap<>());
             inProgressReports.add(new ConcurrentHashMap<>());
 
             final int THREAD_INDEX = i;
 
             Thread t = new Thread(() -> {
-                ConcurrentHashMap<String, StationReportAccumulator> threadSpecificMap = inProgressReportAccumulators
-                        .get(THREAD_INDEX);
                 ConcurrentHashMap<String, StationReport> threadSpecificReport = inProgressReports.get(THREAD_INDEX);
 
                 try {
@@ -163,34 +158,20 @@ public class CalculateAverage_ShannonChristie {
                                         String stationName = line.substring(0, delimiterIndex);
                                         double temperature = Double.parseDouble(line.substring(delimiterIndex + 1));
 
-                                        StationReportAccumulator report = threadSpecificMap.get(stationName);
+                                        StationReport report = threadSpecificReport.get(stationName);
                                         if (report == null) {
-                                            report = new StationReportAccumulator(stationName);
-                                            threadSpecificMap.put(stationName, report);
+                                            report = new StationReport(stationName);
+                                            threadSpecificReport.put(stationName, report);
                                         }
 
-                                        report.addTemperature(temperature);
+                                        report.setSum(report.getSum() + temperature);
+                                        report.setCount(report.getCount() + 1);
+                                        report.setMax(Math.max(report.getMax(), temperature));
+                                        report.setMin(Math.min(report.getMin(), temperature));
                                     } catch (NumberFormatException e) {
                                         System.err.printf("Error parsing temperature in line: %s\n", line);
                                     }
                                 });
-
-                        threadSpecificMap.forEach((ignored, report) -> {
-                            StationReport station = threadSpecificReport.get(report.stationName);
-
-                            if (station == null) {
-                                station = new StationReport(report.stationName);
-
-                                threadSpecificReport.put(station.stationName, station);
-                            }
-
-                            station.setSum(station.getSum() + report.getSum());
-                            station.setCount(station.getCount() + report.getTotal());
-                            station.setMax(Math.max(station.getMax(), report.getMax()));
-                            station.setMin(Math.min(station.getMin(), report.getMin()));
-                        });
-
-                        threadSpecificMap.clear();
 
                         System.out.printf("Worker %d: completed work item in %.2f seconds\n", THREAD_INDEX, (Instant.now().toEpochMilli() - workerStart.toEpochMilli()) / 1000.0);
                     }
@@ -251,65 +232,6 @@ public class CalculateAverage_ShannonChristie {
         });
 
         System.out.printf("Took %.4f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
-    }
-
-    public static class StationReportAccumulator {
-        private final String stationName;
-
-        private final ArrayList<Double> temperatures = new ArrayList<>();
-
-        private int lastCachedCount = -1;
-        private double cachedMax = -100;
-        private double cachedMin = 100;
-
-        public StationReportAccumulator(String stationName) {
-            this.stationName = stationName;
-        }
-
-        public String getStationName() {
-            return stationName;
-        }
-
-        public double getMax() {
-            if (lastCachedCount == temperatures.size()) {
-                return cachedMax;
-            }
-
-            updateCachedNumbers();
-
-            return cachedMax;
-        }
-
-        public double getSum() {
-            return temperatures.stream().mapToDouble(Double::doubleValue).sum();
-        }
-
-        public int getTotal() {
-            return temperatures.size();
-        }
-
-        public double getMin() {
-            if (lastCachedCount == temperatures.size()) {
-                return cachedMin;
-            }
-
-            updateCachedNumbers();
-
-            return cachedMin;
-        }
-
-        public void addTemperature(double temperature) {
-            temperatures.add(temperature);
-        }
-
-        private void updateCachedNumbers() {
-            temperatures.forEach((temperature) -> {
-                cachedMax = Math.max(cachedMax, temperature);
-                cachedMin = Math.min(cachedMin, temperature);
-
-                lastCachedCount = temperatures.size();
-            });
-        }
     }
 
     public static class StationReport {
