@@ -1,9 +1,9 @@
 package dev.morling.onebrc;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.io.RandomAccessFile;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
@@ -11,7 +11,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * e92283e54e6e6e930ff8500841a68a6c057f865c - Serial using streams, lines -> forEach. CHM -> forEach took ~135 seconds.
@@ -40,15 +39,20 @@ public class CalculateAverage_ShannonChristie {
         LinkedBlockingQueue<ArrayList<String>> queue = new LinkedBlockingQueue<>(cores + 2);
 
         Thread readerThread = new Thread(() -> {
-            try (BufferedReader reader = Files.newBufferedReader(Path.of("./measurements.txt"))) {
+            try (RandomAccessFile reader = new RandomAccessFile("./measurements.txt", "r")) {
                 int currentIndex = 0; // Maintain "progress" of read
 
-                while (!readerHasFinished) {
-                    final int offset = BATCH_SIZE * currentIndex++;
+                FileChannel channel = reader.getChannel();
 
+                while (!readerHasFinished) {
                     Instant readerStart = Instant.now();
 
-                    System.out.printf("Reader: about to start at %d\n", offset);
+                    System.out.printf("Reader: about to start at %d\n", currentIndex);
+
+                    MappedByteBuffer mappedByteBuffer = channel.map(FileChannel.MapMode.READ_ONLY, currentIndex, BATCH_SIZE);
+
+                    mappedByteBuffer.load();
+                    mappedByteBuffer.asCharBuffer().;
 
                     ArrayList<String> collect = reader
                             .lines()
