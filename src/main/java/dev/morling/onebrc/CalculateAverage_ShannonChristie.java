@@ -40,14 +40,15 @@ public class CalculateAverage_ShannonChristie {
             try (BufferedReader reader = Files.newBufferedReader(Path.of("./measurements.txt"))) {
                 int currentIndex = 0; // Maintain "progress" of read
 
-                Stream<String> linesStream = reader.lines();
-
                 while (!readerHasFinished) {
                     final int offset = BATCH_SIZE * currentIndex++;
 
+                    Instant readerStart = Instant.now();
+
                     System.out.printf("Reader: about to start at %d\n", offset);
 
-                    ArrayList<String> collect = linesStream
+                    ArrayList<String> collect = reader
+                            .lines()
                             .skip(offset) // Progress through the stream
                             .limit(BATCH_SIZE)
                             .collect(Collectors.toCollection(ArrayList::new));
@@ -61,6 +62,8 @@ public class CalculateAverage_ShannonChristie {
                     if (collect.size() < BATCH_SIZE) { // We've clearly reached the end of the file
                         readerHasFinished = true;
                     }
+
+                    System.out.printf("Reader: read %d lines in %f.2 seconds\n", collect.size(), (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
                 }
             } catch (IOException ex) {
                 System.err.println("Reader: error reading file");
@@ -113,6 +116,8 @@ public class CalculateAverage_ShannonChristie {
 
                         System.out.println("Thread " + THREAD_INDEX + ": got work item");
 
+                        Instant workerStart = Instant.now();
+
                         list
                                 .stream()
                                 .forEach((String line) -> {
@@ -132,6 +137,8 @@ public class CalculateAverage_ShannonChristie {
                                         System.err.printf("Error parsing temperature in line: %s\n", line);
                                     }
                                 });
+
+                        System.out.printf("Worker %d: completed work item in %f.2 seconds\n", THREAD_INDEX, (Instant.now().toEpochMilli() - workerStart.toEpochMilli()) / 1000.0);
                     }
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);
@@ -149,7 +156,7 @@ public class CalculateAverage_ShannonChristie {
 
 
         try {
-            if (!threadProcessingCompletionLatch.await(60, TimeUnit.SECONDS)) {
+            if (!threadProcessingCompletionLatch.await(180, TimeUnit.SECONDS)) {
                 throw new RuntimeException("Timed out waiting for thread processing completion.");
             }
         } catch (InterruptedException e) {
