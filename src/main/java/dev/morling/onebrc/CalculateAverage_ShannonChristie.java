@@ -1,11 +1,9 @@
 package dev.morling.onebrc;
 
+import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.RandomAccessFile;
-import java.nio.CharBuffer;
-import java.nio.MappedByteBuffer;
-import java.nio.channels.FileChannel;
-import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,7 +28,7 @@ public class CalculateAverage_ShannonChristie {
         /////////////////////
         /// Configuration ///
         /////////////////////
-        final int BATCH_SIZE = 100_000_000;
+        final int BATCH_SIZE = 100_000;
 
         //////////////////////////
         /// Auto-configuration ///
@@ -42,63 +40,33 @@ public class CalculateAverage_ShannonChristie {
         LinkedBlockingQueue<ArrayList<String>> queue = new LinkedBlockingQueue<>(cores + 2);
 
         Thread readerThread = new Thread(() -> {
-            try (RandomAccessFile reader = new RandomAccessFile("./measurements.txt", "r")) {
-                long currentIndex = 0; // Maintain "progress" of read
-
-                FileChannel channel = reader.getChannel();
-
+            try (BufferedReader reader = Files.newBufferedReader(Path.of("./measurements.txt"))) {
                 while (!readerHasFinished) {
                     Instant readerStart = Instant.now();
 
-                    System.out.printf("Reader: about to start at %d\n", currentIndex);
-
-                    // Map new section of file
-                    MappedByteBuffer mappedByteBuffer = channel.map(FileChannel.MapMode.READ_ONLY, currentIndex, BATCH_SIZE);
-
-                    // Track last successfully read cursor position
-                    long lastReadIndex = mappedByteBuffer.limit() + currentIndex;
-
-                    // Ensure it's in memory
-                    mappedByteBuffer.load();
-
-                    // Start the walk finding lines
-                    int currentReadLimit = mappedByteBuffer.limit();
-                    int lastLineIndex = 0;
                     ArrayList<String> lines = new ArrayList<>(BATCH_SIZE);
-                    for (int i = 0; i < currentReadLimit; i++) {
-                        if (mappedByteBuffer.get(i) == '\n') {
-                            CharBuffer lineBuffer = StandardCharsets.ISO_8859_1.decode(mappedByteBuffer.slice(lastLineIndex, i - lastLineIndex));
-                            lastLineIndex = i + 1;
+                    String newLine;
+                    while ((newLine = reader.readLine()) != null) {
+                        lines.add(newLine);
 
-                            String newLine = lineBuffer.toString();
-
-                            lines.add(newLine);
+                        if (lines.size() >= BATCH_SIZE) {
+                            break; // Create batches
                         }
                     }
 
-                    // In case the last character wasn't a new line
-                    // when we hit the end of the memory section
-                    if (lastLineIndex != currentReadLimit) {
-                        // It may mean we have an incomplete line, we'll
-                        // start again from this point
-                        lastReadIndex = currentIndex + lastLineIndex;
-                    }
+                    System.out.printf("Reader: read %d lines in %.2f seconds\n", lines.size(), (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
 
-                    System.out.printf("Reader: completed read at %d for %d lines\n", currentIndex, lines.size());
+                    if (lines.isEmpty()) {
+                        System.out.printf("Reader: finished at %.2f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
+
+                        readerHasFinished = true;
+
+                        break;
+                    }
 
                     // If workers can't complete a batch in 20 seconds when we start to block
                     // something must've gone wrong.
                     queue.offer(lines, 20, TimeUnit.SECONDS);
-
-                    if (currentIndex == lastReadIndex) { // We've clearly reached the end of the file
-                        readerHasFinished = true;
-                    }
-
-                    currentIndex = lastReadIndex;
-
-                    mappedByteBuffer.clear();
-
-                    System.out.printf("Reader: read %d lines in %.2f seconds\n", lines.size(), (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
                 }
             } catch (IOException ex) {
                 System.err.println("Reader: error reading file");
