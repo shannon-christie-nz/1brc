@@ -119,16 +119,20 @@ public class CalculateAverage_ShannonChristie {
 
         CountDownLatch threadProcessingCompletionLatch = new CountDownLatch(cores);
 
-        ArrayList<ConcurrentHashMap<String, StationReportAccumulator>> inProgressReports =
+        ArrayList<ConcurrentHashMap<String, StationReportAccumulator>> inProgressReportAccumulators =
                 new ArrayList<>(cores);
+        ArrayList<ConcurrentHashMap<String, StationReport>> inProgressReports = new ArrayList<>(cores);
 
         for (int i = 0; i < cores; i++) {
+            inProgressReportAccumulators.add(new ConcurrentHashMap<>());
             inProgressReports.add(new ConcurrentHashMap<>());
 
             final int THREAD_INDEX = i;
 
             Thread t = new Thread(() -> {
-                ConcurrentHashMap<String, StationReportAccumulator> threadSpecificMap = inProgressReports.get(THREAD_INDEX);
+                ConcurrentHashMap<String, StationReportAccumulator> threadSpecificMap = inProgressReportAccumulators
+                        .get(THREAD_INDEX);
+                ConcurrentHashMap<String, StationReport> threadSpecificReport = inProgressReports.get(THREAD_INDEX);
 
                 try {
                     while (true) {
@@ -170,6 +174,23 @@ public class CalculateAverage_ShannonChristie {
                                         System.err.printf("Error parsing temperature in line: %s\n", line);
                                     }
                                 });
+
+                        threadSpecificMap.forEach((ignored, report) -> {
+                            StationReport station = threadSpecificReport.get(report.stationName);
+
+                            if (station == null) {
+                                station = new StationReport(report.stationName);
+
+                                threadSpecificReport.put(station.stationName, station);
+                            }
+
+                            station.setSum(station.getSum() + report.getSum());
+                            station.setCount(station.getCount() + report.getTotal());
+                            station.setMax(Math.max(station.getMax(), report.getMax()));
+                            station.setMin(Math.min(station.getMin(), report.getMin()));
+                        });
+
+                        threadSpecificMap.clear();
 
                         System.out.printf("Worker %d: completed work item in %.2f seconds\n", THREAD_INDEX, (Instant.now().toEpochMilli() - workerStart.toEpochMilli()) / 1000.0);
                     }
@@ -217,7 +238,7 @@ public class CalculateAverage_ShannonChristie {
                 }
 
                 station.setSum(station.getSum() + report.getSum());
-                station.setCount(station.getCount() + report.getTotal());
+                station.setCount(station.getCount() + report.getCount());
                 station.setMax(Math.max(station.getMax(), report.getMax()));
                 station.setMin(Math.min(station.getMin(), report.getMin()));
             });
