@@ -45,14 +45,14 @@ public class CalculateAverage_ShannonChristie {
                 while (!readerHasFinished) {
                     final int offset = BATCH_SIZE * currentIndex++;
 
-                    System.out.printf("\nReader: about to start at %d", offset);
+                    System.out.printf("Reader: about to start at %d\n", offset);
 
                     ArrayList<String> collect = linesStream
                             .skip(offset) // Progress through the stream
                             .limit(BATCH_SIZE)
                             .collect(Collectors.toCollection(ArrayList::new));
 
-                    System.out.printf("\nReader: completed read at %d for %d lines", offset, collect.size());
+                    System.out.printf("Reader: completed read at %d for %d lines\n", offset, collect.size());
 
                     // If workers can't complete a batch in 20 seconds when we start to block
                     // something must've gone wrong.
@@ -129,7 +129,7 @@ public class CalculateAverage_ShannonChristie {
 
                                         report.addTemperature(temperature);
                                     } catch (NumberFormatException e) {
-                                        System.err.printf("\nError parsing temperature in line: %s", line);
+                                        System.err.printf("Error parsing temperature in line: %s\n", line);
                                     }
                                 });
                     }
@@ -144,7 +144,7 @@ public class CalculateAverage_ShannonChristie {
             t.start();
         }
 
-        System.out.printf("\nAll threads spawned. %d threads", cores);
+        System.out.printf("All threads spawned. %d threads\n", cores);
 
 
 
@@ -186,10 +186,10 @@ public class CalculateAverage_ShannonChristie {
         System.out.println("Processed, about to output now.");
 
         reports.forEach((stationName, report) -> {
-            System.out.printf("\n%s=%.2f/%.2f/%.2f", stationName, report.getMin(), (report.getMax() - report.getMin()) / 2, report.getMax());
+            System.out.printf("%s=%.2f/%.2f/%.2f\n", stationName, report.getMin(), (report.getMax() - report.getMin()) / 2, report.getMax());
         });
 
-        System.out.printf("\nTook %.4f", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
+        System.out.printf("Took %.4f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
     }
 
     public static class StationReportAccumulator {
