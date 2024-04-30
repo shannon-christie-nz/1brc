@@ -41,7 +41,7 @@ public class CalculateAverage_ShannonChristie {
 
         Thread readerThread = new Thread(() -> {
             try (RandomAccessFile reader = new RandomAccessFile("./measurements.txt", "r")) {
-                int currentIndex = 0; // Maintain "progress" of read
+                long currentIndex = 0; // Maintain "progress" of read
 
                 FileChannel channel = reader.getChannel();
 
@@ -54,7 +54,7 @@ public class CalculateAverage_ShannonChristie {
                     MappedByteBuffer mappedByteBuffer = channel.map(FileChannel.MapMode.READ_ONLY, currentIndex, BATCH_SIZE);
 
                     // Track last successfully read cursor position
-                    int lastReadIndex = mappedByteBuffer.limit() + currentIndex;
+                    long lastReadIndex = mappedByteBuffer.limit() + currentIndex;
 
                     // Ensure it's in memory
                     mappedByteBuffer.load();
@@ -74,11 +74,12 @@ public class CalculateAverage_ShannonChristie {
                         }
                     }
 
-                    if (lastReadIndex != currentReadLimit) {
-                        // In case the last character wasn't a new line
-                        // when we hit the end of the memory section
-                        lastReadIndex = currentReadLimit * 2; // It may mean we have an incomplete line, we'll
+                    // In case the last character wasn't a new line
+                    // when we hit the end of the memory section
+                    if (lastLineIndex != currentReadLimit) {
+                        // It may mean we have an incomplete line, we'll
                         // start again from this point
+                        lastReadIndex = currentIndex + lastLineIndex;
                     }
 
                     System.out.printf("Reader: completed read at %d for %d lines\n", currentIndex, lines.size());
