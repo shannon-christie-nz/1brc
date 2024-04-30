@@ -173,15 +173,132 @@ public class CalculateAverage_ShannonChristie {
     }
 
     private static void startReaderThread(int BATCH_SIZE, LinkedBlockingQueue<ArrayList<String>> queue, int READER_TIMEOUT, Instant start) {
+        // Here to ensure we have the disk IO saturated, we'll leave one thread to make
+        // read after read request to the disk.
+        //
+        // No pausing to do any CPU work as much as possible. A buffer will be filled
+        // and then passed along without "any work" before filling another buffer.
+        // This'll keep the disk as busy as possible.
+        //
+        // To minimise GC collection costs, and to help keep both the DiskReader thread
+        // and the LineFormatter thread/s, one blocking queue will maintain a list
+        // of "empty" buffers, ready to be used again, and another "full" buffers
+        // that are ready to be turned into lines.
+        //
+        // The DiskReader will grab an "empty" buffer, and read into it from the disk.
+        // On read completion it'll read backwards from the end to find the last \n
+        // this is to avoid split lines (which cause complexity). Then it'll push
+        // the "full" buffer with a start and end index containing only complete lines.
+        //
+        // The DiskReader will potentially re-read portion of the file from disk using
+        // the last "complete" end index for another BATCH_SIZE into another "empty"
+        // buffer. Repeating the above step again. DiskReader will repeat this until
+        // either the file has no more data, or there are no "empty" buffers available.
+        //
+        // The LineFormatter/s will grab a "full" buffer. This "full" buffer contains
+        // only complete lines. It'll read the buffer into lines and push into the work
+        // queue for the Worker/s. Once a "full" buffer has been processed, it'll be
+        // cleared--either literally cleared, or in some way reset for writing--and
+        // pushed into the "empty" queue for the DiskReader to use again.
+        //
+        // The LineFormatter/s will repeat the above process until there are no more
+        // "full" buffers or until the "empty" queue is blocked longer than the timeout.
+        final int BUFFER_CAPACITY = 6;
+
+        final LinkedBlockingQueue<CharBuffer> emptyBuffers = new LinkedBlockingQueue<>(BUFFER_CAPACITY);
+        final LinkedBlockingQueue<CharBuffer> fullBuffers = new LinkedBlockingQueue<>(BUFFER_CAPACITY);
+
+        populateEmptyBuffers(emptyBuffers, BATCH_SIZE);
+
         Thread readerThread = new Thread(() ->
-            readMeasurementsToQueue(BATCH_SIZE, queue, READER_TIMEOUT, start));
+            readMeasurementsToFormatterQueue(BATCH_SIZE, emptyBuffers, fullBuffers, READER_TIMEOUT, start));
+
+        Thread formatterThread = new Thread(() ->
+            formatMeasurementsToQueue(BATCH_SIZE, fullBuffers, queue, emptyBuffers, READER_TIMEOUT, start));
 
         readerThread.start();
 
         System.out.println("Reader thread started");
     }
 
-    private static void readMeasurementsToQueue(int BATCH_SIZE, LinkedBlockingQueue<ArrayList<String>> queue, int READER_TIMEOUT, Instant start) {
+    private static void populateEmptyBuffers(LinkedBlockingQueue<CharBuffer> emptyBuffers, int BATCH_SIZE) {
+        int capacity = emptyBuffers.remainingCapacity();
+
+        for (int i = 0; i < capacity; i++) {
+            emptyBuffers.offer(CharBuffer.allocate(BATCH_SIZE));
+        }
+    }
+
+    private static void readMeasurementsToFormatterQueue(int BUFFER_SIZE,
+                                                         LinkedBlockingQueue<CharBuffer> emptyBuffers,
+                                                         LinkedBlockingQueue<CharBuffer> fullBuffers,
+                                                         int READER_TIMEOUT,
+                                                         Instant start) {
+        try (BufferedReader reader = Files.newBufferedReader(Path.of("./measurements.txt"))) {
+            CharBuffer charBuffer = emptyBuffers.poll(4, TimeUnit.SECONDS);
+
+            if (charBuffer == null) {
+                readerHasFinished = true;
+
+                throw new RuntimeException("Reader: Failed to get an empty buffer");
+            }
+
+            int read;
+            while ((read = reader.read(charBuffer)) != -1) {
+                Instant readerStart = Instant.now();
+
+                ArrayList<String> lines = new ArrayList<>(BUFFER_SIZE);
+
+                int lastRead = 0;
+                for (int i = 0; i < read; i++) {
+                    if (charBuffer.get(i) == '\n') {
+                        CharBuffer lineBuffer = charBuffer.slice(lastRead, i - lastRead);
+
+                        if (carryOverLine == null) {
+                            lines.add(lineBuffer.toString());
+                        } else {
+                            lines.add(carryOverLine + lineBuffer.toString());
+                            carryOverLine = null;
+                        }
+
+                        lastRead = i + 1;
+                    }
+                }
+
+                if (lastRead != read) {
+                    // We didn't complete a line
+                    carryOverLine = charBuffer.slice(lastRead, read - lastRead).toString();
+                }
+
+                System.out.printf("Reader: read %d lines in %.2f seconds\n", lines.size(), (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
+
+                // If workers can't complete a batch in 20 seconds when we start to block
+                // something must've gone wrong.
+                fullBuffers.offer(lines, READER_TIMEOUT, TimeUnit.SECONDS);
+
+                charBuffer.clear();
+            }
+
+            System.out.printf("Reader: finished at %.2f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
+        } catch (IOException ex) {
+            System.err.println("Reader: error reading file");
+
+            System.err.println(ex.getMessage());
+        } catch (InterruptedException ex) {
+            System.err.println("Reader: workers couldn't process fast enough, we timed out at 20 seconds");
+
+            System.err.println(ex.getMessage());
+        } finally {
+            readerHasFinished = true;
+        }
+    }
+
+    private static void formatMeasurementsToQueue(int BATCH_SIZE,
+                                                  LinkedBlockingQueue<CharBuffer> fullBuffers,
+                                                  LinkedBlockingQueue<ArrayList<String>> queue,
+                                                  LinkedBlockingQueue<CharBuffer> emptyBuffers,
+                                                  int READER_TIMEOUT,
+                                                  Instant start) {
         try (BufferedReader reader = Files.newBufferedReader(Path.of("./measurements.txt"))) {
             CharBuffer charBuffer = CharBuffer.allocate(BATCH_SIZE);
             String carryOverLine = null;
