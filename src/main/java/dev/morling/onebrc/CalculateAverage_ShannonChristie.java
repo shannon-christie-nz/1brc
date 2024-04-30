@@ -32,12 +32,14 @@ public class CalculateAverage_ShannonChristie {
         /// Configuration ///
         /////////////////////
         final int BATCH_SIZE = 10_000_000;
+        final int READER_TIMEOUT = 20;
+        final int WORKER_TIMEOUT = 6;
 
         //////////////////////////
         /// Auto-configuration ///
         //////////////////////////
         Runtime runtime = Runtime.getRuntime();
-        int cores = Math.max(1, runtime.availableProcessors() - 1);
+        int cores = Math.max(1, Math.min(runtime.availableProcessors() / 2, 4));
 
         LinkedBlockingQueue<ArrayList<String>> queue = new LinkedBlockingQueue<>(cores);
 
@@ -68,7 +70,7 @@ public class CalculateAverage_ShannonChristie {
 
                     // If workers can't complete a batch in 20 seconds when we start to block
                     // something must've gone wrong.
-                    queue.offer(lines, 20, TimeUnit.SECONDS);
+                    queue.offer(lines, READER_TIMEOUT, TimeUnit.SECONDS);
                 }
             } catch (IOException ex) {
                 System.err.println("Reader: error reading file");
@@ -104,7 +106,7 @@ public class CalculateAverage_ShannonChristie {
                 try {
                     while (true) {
                         // If this takes more than 4 seconds, we either finished or something went wrong
-                        ArrayList<String> list = queue.poll(4, TimeUnit.SECONDS);
+                        ArrayList<String> list = queue.poll(WORKER_TIMEOUT, TimeUnit.SECONDS);
 
                         if (list == null) {
                             System.out.println("Thread " + THREAD_INDEX + ": no more data");
