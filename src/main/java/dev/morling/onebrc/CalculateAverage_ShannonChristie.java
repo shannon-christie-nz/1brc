@@ -47,13 +47,13 @@ public class CalculateAverage_ShannonChristie {
 
         Thread readerThread = new Thread(() -> {
             try (BufferedReader reader = Files.newBufferedReader(Path.of("./measurements.txt"))) {
-                Instant readerStart = Instant.now();
-
                 CharBuffer charBuffer = CharBuffer.allocate(BATCH_SIZE);
                 String carryOverLine = null;
 
                 int read;
                 while ((read = reader.read(charBuffer)) != -1) {
+                    Instant readerStart = Instant.now();
+
                     ArrayList<String> lines = new ArrayList<>(BATCH_SIZE);
 
                     int lastRead = 0;
