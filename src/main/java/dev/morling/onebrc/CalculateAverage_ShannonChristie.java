@@ -2,6 +2,7 @@ package dev.morling.onebrc;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.CharBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.time.Instant;
@@ -10,7 +11,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 /**
  * e92283e54e6e6e930ff8500841a68a6c057f865c - Serial using streams, lines -> forEach. CHM -> forEach took ~135 seconds.
@@ -49,28 +49,51 @@ public class CalculateAverage_ShannonChristie {
 
                     System.out.printf("Reader: about to start at %d\n", currentIndex);
 
+                    // Map new section of file
                     MappedByteBuffer mappedByteBuffer = channel.map(FileChannel.MapMode.READ_ONLY, currentIndex, BATCH_SIZE);
 
+                    // Track last successfully read cursor position
+                    int lastReadIndex = mappedByteBuffer.limit() + currentIndex;
+
+                    // Ensure it's in memory
                     mappedByteBuffer.load();
-                    mappedByteBuffer.asCharBuffer().;
+                    CharBuffer bufferAsCharBuffer = mappedByteBuffer.asCharBuffer();
 
-                    ArrayList<String> collect = reader
-                            .lines()
-                            .skip(offset) // Progress through the stream
-                            .limit(BATCH_SIZE)
-                            .collect(Collectors.toCollection(ArrayList::new));
+                    // Start the walk finding lines
+                    int currentReadLimit = bufferAsCharBuffer.limit();
+                    int lastLineIndex = 0;
+                    ArrayList<String> lines = new ArrayList<>(BATCH_SIZE);
+                    for (int i = 0; i < currentReadLimit; i++) {
+                        if (bufferAsCharBuffer.get(i) == '\n') {
+                            CharBuffer lineBuffer = bufferAsCharBuffer.slice(lastLineIndex, i);
+                            lastLineIndex = i + 1;
 
-                    System.out.printf("Reader: completed read at %d for %d lines\n", offset, collect.size());
+                            String newLine = lineBuffer.toString();
+
+                            lines.add(newLine);
+                        }
+                    }
+
+                    if (lastReadIndex != currentReadLimit) {
+                        // In case the last character wasn't a new line
+                        // when we hit the end of the memory section
+                        lastReadIndex = currentReadLimit * 2; // It may mean we have an incomplete line, we'll
+                        // start again from this point
+                    }
+
+                    System.out.printf("Reader: completed read at %d for %d lines\n", currentIndex, lines.size());
 
                     // If workers can't complete a batch in 20 seconds when we start to block
                     // something must've gone wrong.
-                    queue.offer(collect, 20, TimeUnit.SECONDS);
+                    queue.offer(lines, 20, TimeUnit.SECONDS);
 
-                    if (collect.size() < BATCH_SIZE) { // We've clearly reached the end of the file
+                    if (currentIndex == lastReadIndex) { // We've clearly reached the end of the file
                         readerHasFinished = true;
                     }
 
-                    System.out.printf("Reader: read %d lines in %f.2 seconds\n", collect.size(), (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
+                    currentIndex = lastReadIndex;
+
+                    System.out.printf("Reader: read %d lines in %.2f seconds\n", lines.size(), (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
                 }
             } catch (IOException ex) {
                 System.err.println("Reader: error reading file");
@@ -145,7 +168,7 @@ public class CalculateAverage_ShannonChristie {
                                     }
                                 });
 
-                        System.out.printf("Worker %d: completed work item in %f.2 seconds\n", THREAD_INDEX, (Instant.now().toEpochMilli() - workerStart.toEpochMilli()) / 1000.0);
+                        System.out.printf("Worker %d: completed work item in %.2f seconds\n", THREAD_INDEX, (Instant.now().toEpochMilli() - workerStart.toEpochMilli()) / 1000.0);
                     }
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);
