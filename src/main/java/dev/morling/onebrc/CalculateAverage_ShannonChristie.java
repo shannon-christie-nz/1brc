@@ -19,6 +19,7 @@ import java.util.concurrent.TimeUnit;
  * 382743987775cd6ca97ee77cbfb20ee09ca8398b - 1r1w. RandomAccessFile + Memory Mapped v1. Took ~153 seconds.
  * a72fa41407128babb10a8f441f4f5a3b03f138ed - 1r1w. RandomAccessFile + Memory Mapped v1. Refactor. Took ~141 seconds.
  * f78d737d0181c1c42a1a067210da76d5701af7a7 - 1r1w. BufferedReader again. Took ~68 seconds.
+ * 0fbbfdb2717a59fd25ce6f30721732ce4fde075a - 1r1w. BufferedReader, 1 million batches. Took ~91 seconds.
  * */
 public class CalculateAverage_ShannonChristie {
     public static boolean readerHasFinished = false;
@@ -29,7 +30,7 @@ public class CalculateAverage_ShannonChristie {
         /////////////////////
         /// Configuration ///
         /////////////////////
-        final int BATCH_SIZE = 1_000_000;
+        final int BATCH_SIZE = 10_000_000;
 
         //////////////////////////
         /// Auto-configuration ///
