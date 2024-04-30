@@ -34,7 +34,7 @@ public class CalculateAverage_ShannonChristie {
         Runtime runtime = Runtime.getRuntime();
         int cores = runtime.availableProcessors();
 
-        LinkedBlockingQueue queue = new LinkedBlockingQueue<ArrayList<String>>(cores + 2);
+        LinkedBlockingQueue<ArrayList<String>> queue = new LinkedBlockingQueue<>(cores + 2);
 
         Thread readerThread = new Thread(() -> {
             try (BufferedReader reader = Files.newBufferedReader(Path.of("./measurements.txt"))) {
@@ -45,14 +45,14 @@ public class CalculateAverage_ShannonChristie {
                 while (!readerHasFinished) {
                     final int offset = BATCH_SIZE * currentIndex++;
 
-                    System.out.printf("Reader: about to start at %d", offset);
+                    System.out.printf("\nReader: about to start at %d", offset);
 
                     ArrayList<String> collect = linesStream
                             .skip(offset) // Progress through the stream
                             .limit(BATCH_SIZE)
                             .collect(Collectors.toCollection(ArrayList::new));
 
-                    System.out.printf("Reader: completed read at %d for %d lines", offset, collect.size());
+                    System.out.printf("\nReader: completed read at %d for %d lines", offset, collect.size());
 
                     // If workers can't complete a batch in 20 seconds when we start to block
                     // something must've gone wrong.
@@ -83,56 +83,70 @@ public class CalculateAverage_ShannonChristie {
 
         CountDownLatch threadProcessingCompletionLatch = new CountDownLatch(cores);
 
-        ArrayList<ArrayList<ProcessedLine>> processedLines =
+        ArrayList<ConcurrentHashMap<String, StationReportAccumulator>> inProgressReports =
                 new ArrayList<>(cores);
 
         for (int i = 0; i < cores; i++) {
-            processedLines.add(new ArrayList<>(BATCH_SIZE));
+            inProgressReports.add(new ConcurrentHashMap<>());
 
             final int THREAD_INDEX = i;
-            final int OFFSET = i * BATCH_SIZE;
 
             Thread t = new Thread(() -> {
-                ArrayList<ProcessedLine> processedLinesPerThread = processedLines.get(THREAD_INDEX);
+                ConcurrentHashMap<String, StationReportAccumulator> threadSpecificMap = inProgressReports.get(THREAD_INDEX);
 
-                int batchIndex = 0;
+                try {
+                    while (true) {
+                        // If this takes more than 4 seconds, we either finished or something went wrong
+                        ArrayList<String> list = queue.poll(4, TimeUnit.SECONDS);
 
-                while (batchIndex < BATCHES_PER_CORE) {
-                    System.out.printf(
-                            "\n%d - Starting batch %d",
-                            THREAD_INDEX,
-                            batchIndex
-                    );
+                        if (list == null) {
+                            System.out.println("Thread " + THREAD_INDEX + ": no more data");
 
-                    int startIndex = batchIndex * BATCH_SIZE + OFFSET;
-                    int endIndex = Math.min(startIndex + BATCH_SIZE, lineToProcess.size());
+                            if (!readerHasFinished) {
+                                System.err.println("Thread " + THREAD_INDEX + ": reader hadn't finished");
 
-                    for (int j = startIndex; j < endIndex; j++) {
-                        LineToProcess item = lineToProcess.get(j);
+                                throw new RuntimeException("Thread " + THREAD_INDEX + ": no more data yet reader hadn't finished");
+                            }
 
-                        ProcessedLine processedLine = new ProcessedLine(
-                                item.line().substring(0, item.delimiterIndex()),
-                                Double.parseDouble(item.line().substring(item.delimiterIndex()))
-                        );
+                            break;
+                        }
 
-                        processedLinesPerThread.add(processedLine);
+                        System.out.println("Thread " + THREAD_INDEX + ": got work item");
+
+                        list
+                                .stream()
+                                .forEach((String line) -> {
+                                    try {
+                                        int delimiterIndex = line.indexOf(";");
+                                        String stationName = line.substring(0, delimiterIndex);
+                                        double temperature = Double.parseDouble(line.substring(delimiterIndex + 1));
+
+                                        StationReportAccumulator report = threadSpecificMap.get(stationName);
+                                        if (report == null) {
+                                            report = new StationReportAccumulator(stationName);
+                                            threadSpecificMap.put(stationName, report);
+                                        }
+
+                                        report.addTemperature(temperature);
+                                    } catch (NumberFormatException e) {
+                                        System.err.printf("\nError parsing temperature in line: %s", line);
+                                    }
+                                });
                     }
-
-                    batchIndex++;
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                } finally {
+                    // We completed all of our data, or something else went wrong
+                    threadProcessingCompletionLatch.countDown();
                 }
-
-                System.out.printf(
-                        "\n%d - Completed all batches",
-                        THREAD_INDEX
-                );
-
-                threadProcessingCompletionLatch.countDown();
             });
 
             t.start();
         }
 
         System.out.printf("\nAll threads spawned. %d threads", cores);
+
+
 
         try {
             if (!threadProcessingCompletionLatch.await(60, TimeUnit.SECONDS)) {
@@ -144,25 +158,103 @@ public class CalculateAverage_ShannonChristie {
             throw new RuntimeException(e);
         }
 
-        System.out.println("\nProcessing the data");
+
+
+        System.out.println("Processing the data");
 
         ConcurrentHashMap<String, StationReport> reports = new ConcurrentHashMap<>(10_000);
 
+        inProgressReports.forEach((threadMap) -> {
+            System.out.println("Got thread map, processing");
+
+            threadMap.forEach((ignored, report) -> {
+                StationReport station = reports.get(report.stationName);
+
+                if (station == null) {
+                    station = new StationReport(report.stationName);
+
+                    reports.put(station.stationName, station);
+                }
+
+                station.setSum(station.getSum() + report.getSum());
+                station.setCount(station.getCount() + report.getTotal());
+                station.setMax(Math.max(station.getMax(), report.getMax()));
+                station.setMin(Math.min(station.getMin(), report.getMin()));
+            });
+        });
+
+        System.out.println("Processed, about to output now.");
+
         reports.forEach((stationName, report) -> {
-            System.out.printf("%s=%.2f/%.2f/%.2f", stationName, report.getMin(), (report.getMax() - report.getMin()) / 2, report.getMax());
+            System.out.printf("\n%s=%.2f/%.2f/%.2f", stationName, report.getMin(), (report.getMax() - report.getMin()) / 2, report.getMax());
         });
 
         System.out.printf("\nTook %.4f", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
     }
 
-    public static record LineToProcess(int delimiterIndex, String line) {}
+    public static class StationReportAccumulator {
+        private final String stationName;
 
-    public static record ProcessedLine(String stationName, double temperature) {}
+        private final ArrayList<Double> temperatures = new ArrayList<>();
+
+        private int lastCachedCount = -1;
+        private double cachedMax = -100;
+        private double cachedMin = 100;
+
+        public StationReportAccumulator(String stationName) {
+            this.stationName = stationName;
+        }
+
+        public String getStationName() {
+            return stationName;
+        }
+
+        public double getMax() {
+            if (lastCachedCount == temperatures.size()) {
+                return cachedMax;
+            }
+
+            updateCachedNumbers();
+
+            return cachedMax;
+        }
+
+        public double getSum() {
+            return temperatures.stream().mapToDouble(Double::doubleValue).sum();
+        }
+
+        public int getTotal() {
+            return temperatures.size();
+        }
+
+        public double getMin() {
+            if (lastCachedCount == temperatures.size()) {
+                return cachedMin;
+            }
+
+            updateCachedNumbers();
+
+            return cachedMin;
+        }
+
+        public void addTemperature(double temperature) {
+            temperatures.add(temperature);
+        }
+
+        private void updateCachedNumbers() {
+            temperatures.forEach((temperature) -> {
+                cachedMax = Math.max(cachedMax, temperature);
+                cachedMin = Math.min(cachedMin, temperature);
+
+                lastCachedCount = temperatures.size();
+            });
+        }
+    }
 
     public static class StationReport {
         private final String stationName;
-        private double min;
-        private double max;
+        private double min, sum, max;
+        private int count;
 
         public StationReport(String stationName) {
             this.stationName = stationName;
@@ -172,20 +264,36 @@ public class CalculateAverage_ShannonChristie {
             return stationName;
         }
 
-        public void setMax(double max) {
-            this.max = max;
-        }
-
-        public double getMax() {
-            return max;
+        public double getMin() {
+            return min;
         }
 
         public void setMin(double min) {
             this.min = min;
         }
 
-        public double getMin() {
-            return min;
+        public double getMax() {
+            return max;
+        }
+
+        public void setMax(double max) {
+            this.max = max;
+        }
+
+        public int getCount() {
+            return count;
+        }
+
+        public void setCount(int count) {
+            this.count = count;
+        }
+
+        public double getSum() {
+            return sum;
+        }
+
+        public void setSum(double sum) {
+            this.sum = sum;
         }
     }
 }
