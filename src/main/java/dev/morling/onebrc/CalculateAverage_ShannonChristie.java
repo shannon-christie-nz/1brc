@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
  * 0fbbfdb2717a59fd25ce6f30721732ce4fde075a - 1r1w. BufferedReader, 1 million per batch. Took ~91 seconds.
  * 4c3793c44cca3da29013138e19f09637465fef0a - 1r1w. BR, 10 million per batch. Took ~69 seconds.
  * f722624b8c3ffa63c2a7b1936bcfec5846a79f08 - 1r~4w. BR, 10 million/batch. Took ~68 seconds.
+ * 5efb0d63ebe89adc77830773dcf911fc0dc78f4d - 1r~4w. BR, Read to buffer 10m bytes. Took ~120 seconds.
  * */
 public class CalculateAverage_ShannonChristie {
     public static boolean readerHasFinished = false;
@@ -33,7 +34,7 @@ public class CalculateAverage_ShannonChristie {
         /////////////////////
         /// Configuration ///
         /////////////////////
-        final int BATCH_SIZE = 10_000_000;
+        final int BATCH_SIZE = 100_000_000;
         final int READER_TIMEOUT = 20;
         final int WORKER_TIMEOUT = 6;
 
