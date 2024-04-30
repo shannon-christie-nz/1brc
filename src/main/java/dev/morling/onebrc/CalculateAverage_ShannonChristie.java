@@ -47,67 +47,17 @@ public class CalculateAverage_ShannonChristie {
 
         LinkedBlockingQueue<ArrayList<String>> queue = new LinkedBlockingQueue<>(cores);
 
-        Thread readerThread = new Thread(() -> {
-            try (BufferedReader reader = Files.newBufferedReader(Path.of("./measurements.txt"))) {
-                CharBuffer charBuffer = CharBuffer.allocate(BATCH_SIZE);
-                String carryOverLine = null;
+        startReaderThread(BATCH_SIZE, queue, READER_TIMEOUT, start);
 
-                int read;
-                while ((read = reader.read(charBuffer)) != -1) {
-                    Instant readerStart = Instant.now();
+        ArrayList<ConcurrentHashMap<String, StationReport>> inProgressReports =
+                startWorkerThreads(cores, queue, WORKER_TIMEOUT);
 
-                    ArrayList<String> lines = new ArrayList<>(BATCH_SIZE);
+        processAndOutputReports(inProgressReports);
 
-                    int lastRead = 0;
-                    for (int i = 0; i < read; i++) {
-                        if (charBuffer.get(i) == '\n') {
-                            CharBuffer lineBuffer = charBuffer.slice(lastRead, i - lastRead);
+        System.out.printf("Took %.4f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
+    }
 
-                            if (carryOverLine == null) {
-                                lines.add(lineBuffer.toString());
-                            } else {
-                                lines.add(carryOverLine + lineBuffer.toString());
-                                carryOverLine = null;
-                            }
-
-                            lastRead = i + 1;
-                        }
-                    }
-
-                    if (lastRead != read) {
-                        // We didn't complete a line
-                        carryOverLine = charBuffer.slice(lastRead, read - lastRead).toString();
-                    }
-
-                    System.out.printf("Reader: read %d lines in %.2f seconds\n", lines.size(), (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
-
-                    // If workers can't complete a batch in 20 seconds when we start to block
-                    // something must've gone wrong.
-                    queue.offer(lines, READER_TIMEOUT, TimeUnit.SECONDS);
-
-                    charBuffer.clear();
-                }
-
-                System.out.printf("Reader: finished at %.2f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
-            } catch (IOException ex) {
-                System.err.println("Reader: error reading file");
-
-                System.err.println(ex.getMessage());
-            } catch (InterruptedException ex) {
-                System.err.println("Reader: workers couldn't process fast enough, we timed out at 20 seconds");
-
-                System.err.println(ex.getMessage());
-            } finally {
-                readerHasFinished = true;
-            }
-        });
-
-        readerThread.start();
-
-        System.out.println("Reader thread started");
-
-
-
+    private static ArrayList<ConcurrentHashMap<String, StationReport>> startWorkerThreads(int cores, LinkedBlockingQueue<ArrayList<String>> queue, int WORKER_TIMEOUT) {
         CountDownLatch threadProcessingCompletionLatch = new CountDownLatch(cores);
 
         ArrayList<ConcurrentHashMap<String, StationReport>> inProgressReports = new ArrayList<>(cores);
@@ -179,8 +129,6 @@ public class CalculateAverage_ShannonChristie {
 
         System.out.printf("All threads spawned. %d threads\n", cores);
 
-
-
         try {
             if (!threadProcessingCompletionLatch.await(180, TimeUnit.SECONDS)) {
                 throw new RuntimeException("Timed out waiting for thread processing completion.");
@@ -190,9 +138,10 @@ public class CalculateAverage_ShannonChristie {
 
             throw new RuntimeException(e);
         }
+        return inProgressReports;
+    }
 
-
-
+    private static void processAndOutputReports(ArrayList<ConcurrentHashMap<String, StationReport>> inProgressReports) {
         System.out.println("Processing the data");
 
         ConcurrentHashMap<String, StationReport> reports = new ConcurrentHashMap<>(10_000);
@@ -221,8 +170,70 @@ public class CalculateAverage_ShannonChristie {
         reports.forEach((stationName, report) -> {
             System.out.printf("%s=%.2f/%.2f/%.2f\n", stationName, report.getMin(), (report.getMax() - report.getMin()) / 2, report.getMax());
         });
+    }
 
-        System.out.printf("Took %.4f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
+    private static void startReaderThread(int BATCH_SIZE, LinkedBlockingQueue<ArrayList<String>> queue, int READER_TIMEOUT, Instant start) {
+        Thread readerThread = new Thread(() ->
+            readMeasurementsToQueue(BATCH_SIZE, queue, READER_TIMEOUT, start));
+
+        readerThread.start();
+
+        System.out.println("Reader thread started");
+    }
+
+    private static void readMeasurementsToQueue(int BATCH_SIZE, LinkedBlockingQueue<ArrayList<String>> queue, int READER_TIMEOUT, Instant start) {
+        try (BufferedReader reader = Files.newBufferedReader(Path.of("./measurements.txt"))) {
+            CharBuffer charBuffer = CharBuffer.allocate(BATCH_SIZE);
+            String carryOverLine = null;
+
+            int read;
+            while ((read = reader.read(charBuffer)) != -1) {
+                Instant readerStart = Instant.now();
+
+                ArrayList<String> lines = new ArrayList<>(BATCH_SIZE);
+
+                int lastRead = 0;
+                for (int i = 0; i < read; i++) {
+                    if (charBuffer.get(i) == '\n') {
+                        CharBuffer lineBuffer = charBuffer.slice(lastRead, i - lastRead);
+
+                        if (carryOverLine == null) {
+                            lines.add(lineBuffer.toString());
+                        } else {
+                            lines.add(carryOverLine + lineBuffer.toString());
+                            carryOverLine = null;
+                        }
+
+                        lastRead = i + 1;
+                    }
+                }
+
+                if (lastRead != read) {
+                    // We didn't complete a line
+                    carryOverLine = charBuffer.slice(lastRead, read - lastRead).toString();
+                }
+
+                System.out.printf("Reader: read %d lines in %.2f seconds\n", lines.size(), (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
+
+                // If workers can't complete a batch in 20 seconds when we start to block
+                // something must've gone wrong.
+                queue.offer(lines, READER_TIMEOUT, TimeUnit.SECONDS);
+
+                charBuffer.clear();
+            }
+
+            System.out.printf("Reader: finished at %.2f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
+        } catch (IOException ex) {
+            System.err.println("Reader: error reading file");
+
+            System.err.println(ex.getMessage());
+        } catch (InterruptedException ex) {
+            System.err.println("Reader: workers couldn't process fast enough, we timed out at 20 seconds");
+
+            System.err.println(ex.getMessage());
+        } finally {
+            readerHasFinished = true;
+        }
     }
 
     public static class StationReport {
