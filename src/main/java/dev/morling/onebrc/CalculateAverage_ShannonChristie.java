@@ -3,7 +3,6 @@ package dev.morling.onebrc;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
@@ -165,10 +164,7 @@ public class CalculateAverage_ShannonChristie {
                                 } else if (buffer.get(i) == '\n') { // Got a new line
                                     // We expect that all lines are valid in terms of having
                                     // a station name and a temperature.
-                                    String stationName = StandardCharsets.ISO_8859_1.decode(
-                                            buffer.slice(lastIndex, delimiterIndex - lastIndex)
-                                    ).toString();
-
+                                    String stationName = getStationNameString(delimiterIndex, lastIndex, buffer);
                                     double temperature = getTemperatureDouble(buffer, delimiterIndex, i);
 
                                     StationReport report = threadSpecificReport
@@ -212,6 +208,17 @@ public class CalculateAverage_ShannonChristie {
             throw new RuntimeException(e);
         }
         return inProgressReports;
+    }
+
+    private static String getStationNameString(int delimiterIndex, int lastIndex, ByteBuffer buffer) {
+        int length = delimiterIndex - lastIndex;
+        char[] charArrayBuffer = new char[length];
+        for (int j = 0; j < length; j++) {
+            charArrayBuffer[j] = (char) buffer.get(lastIndex + j);
+        }
+
+        String stationName = String.valueOf(charArrayBuffer);
+        return stationName;
     }
 
     private static double getTemperatureDouble(ByteBuffer buffer, int delimiterIndex, int i) {
