@@ -29,6 +29,8 @@ import java.util.concurrent.TimeUnit;
  * 37091ca3524816d763e55697a12607420f9d3228 - "". FileInputChannel, to 100m bytes buffer. Workers decode buffer and work directly. No Strings for new lines. Took ~56 seconds.
  * 57818dec1507fd3908441bec6a60ffa5f5f7784e - 1r~7w. "" "" "". Took ~42 seconds.
  * 200c564dc56729dfb7671a2aa53bd287ed51eb6b - 1r~15w. "" "" "". Took ~47 seconds.
+ * 4ff30825f45578b171d5cd56ce886e914c03e323 - competition 1r~7w. "". Took ~43 seconds. - No major delays from disk IO.
+ *
  * */
 public class CalculateAverage_ShannonChristie {
     private static volatile boolean readerHasFinished = false;
@@ -39,8 +41,8 @@ public class CalculateAverage_ShannonChristie {
     /// Configuration ///
     /////////////////////
     private static final int BUFFER_SIZE = 100_000_000;
-    private static final int READER_TIMEOUT = 20;
-    private static final int WORKER_TIMEOUT = 6;
+    private static final int READER_TIMEOUT = 2;
+    private static final int WORKER_TIMEOUT = 2;
 
     //////////////////////////
     /// Auto-configuration ///
