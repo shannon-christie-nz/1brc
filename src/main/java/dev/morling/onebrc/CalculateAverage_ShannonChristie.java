@@ -1,10 +1,11 @@
 package dev.morling.onebrc;
 
-import java.io.BufferedReader;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.CharBuffer;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
@@ -44,7 +45,7 @@ public class CalculateAverage_ShannonChristie {
     private static final int cores = Math.max(1, Math.min(Runtime.getRuntime().availableProcessors() / 2, 4));
 
     public static void main(String[] args) {
-        LinkedBlockingQueue<CharBuffer> queue = new LinkedBlockingQueue<>(cores);
+        LinkedBlockingQueue<ByteBuffer> queue = new LinkedBlockingQueue<>(cores);
 
         startReaderThread(queue);
 
@@ -54,7 +55,7 @@ public class CalculateAverage_ShannonChristie {
         processAndOutputReports(inProgressReports);
     }
 
-    private static void startReaderThread(LinkedBlockingQueue<CharBuffer> queue) {
+    private static void startReaderThread(LinkedBlockingQueue<ByteBuffer> queue) {
         Thread readerThread = new Thread(() ->
             readMeasurementsToQueue(queue));
 
@@ -63,42 +64,39 @@ public class CalculateAverage_ShannonChristie {
         System.out.println("Reader thread started");
     }
 
-    private static void readMeasurementsToQueue(LinkedBlockingQueue<CharBuffer> queue) {
-        try (FileInputStream fileInputStream = new FileInputStream("./measurements.txt");
-                BufferedReader reader = new BufferedReader(new InputStreamReader(fileInputStream))) {
-
-            CharBuffer charBuffer;
-            while (reader.read(charBuffer = CharBuffer.allocate(BUFFER_SIZE)) != -1) {
+    private static void readMeasurementsToQueue(LinkedBlockingQueue<ByteBuffer> queue) {
+        try (FileChannel inputFileChannel =
+                     FileChannel.open(Path.of("./measurements.txt"), StandardOpenOption.READ)) {
+            ByteBuffer byteBuffer;
+            while (inputFileChannel.read(byteBuffer = ByteBuffer.allocate(BUFFER_SIZE)) != -1) {
                 Instant readerStart = Instant.now();
 
                 // Let's read backwards to find the last complete line
                 for (int i = 0; i < 100; i++) {
-                    int readIndex = charBuffer.capacity() - i;
+                    int readIndex = byteBuffer.capacity() - i;
 
-                    if (charBuffer.get(readIndex - 1) == '\n') {
-                        charBuffer.limit(readIndex); // Reduce limit to last valid line
+                    if (byteBuffer.get(readIndex - 1) == '\n') {
+                        byteBuffer.limit(readIndex); // Reduce limit to last valid line
 
                         break; // We can move on now.
                     }
                 }
 
-                if (charBuffer.limit() != charBuffer.capacity()) {
+                if (byteBuffer.limit() != byteBuffer.capacity()) {
                     // We didn't complete a line, we need to track this change for ensuring
                     // the next read works as intended... i.e. continuing at the start of
                     // the incomplete line.
 
                     // Position returns the channel itself. It's not creating a new one.
-                    // NOTE - Doesn't reset the reader, reader continues from previous position
-                    fileInputStream.getChannel().position(
-                            fileInputStream.getChannel().position() -
-                                    charBuffer.capacity() - charBuffer.limit()); // Seek back the difference
+                    inputFileChannel.position(inputFileChannel.position() -
+                            (byteBuffer.capacity() - byteBuffer.limit()));// Seek back the difference
                 }
 
                 System.out.printf("Reader: read in %.2f seconds\n", (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
 
                 // If workers can't complete a batch in 20 seconds when we start to block
                 // something must've gone wrong.
-                queue.offer(charBuffer, READER_TIMEOUT, TimeUnit.SECONDS);
+                queue.offer(byteBuffer, READER_TIMEOUT, TimeUnit.SECONDS);
             }
 
             System.out.printf("Reader: finished at %.2f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
@@ -115,7 +113,7 @@ public class CalculateAverage_ShannonChristie {
         }
     }
 
-    private static ArrayList<ConcurrentHashMap<String, StationReport>> startWorkerThreads(LinkedBlockingQueue<CharBuffer> queue) {
+    private static ArrayList<ConcurrentHashMap<String, StationReport>> startWorkerThreads(LinkedBlockingQueue<ByteBuffer> queue) {
         CountDownLatch threadProcessingCompletionLatch = new CountDownLatch(cores);
 
         ArrayList<ConcurrentHashMap<String, StationReport>> inProgressReports = new ArrayList<>(cores);
@@ -131,7 +129,7 @@ public class CalculateAverage_ShannonChristie {
                 try {
                     while (true) {
                         // If this takes more than 4 seconds, we either finished or something went wrong
-                        CharBuffer buffer = queue.poll(WORKER_TIMEOUT, TimeUnit.SECONDS);
+                        ByteBuffer buffer = queue.poll(WORKER_TIMEOUT, TimeUnit.SECONDS);
 
                         if (buffer == null) {
                             System.out.println("Thread " + THREAD_INDEX + ": no more data");
@@ -160,9 +158,13 @@ public class CalculateAverage_ShannonChristie {
                                 } else if (buffer.get(i) == '\n') { // Got a new line
                                     // We expect that all lines are valid in terms of having
                                     // a station name and a temperature.
-                                    String stationName = buffer.slice(lastIndex, delimiterIndex).toString();
+                                    String stationName = StandardCharsets.ISO_8859_1.decode(
+                                            buffer.slice(lastIndex, delimiterIndex - lastIndex)
+                                    ).toString();
                                     double temperature = Double.parseDouble(
-                                            buffer.slice(delimiterIndex + 1, i - delimiterIndex).toString());
+                                            StandardCharsets.ISO_8859_1.decode(
+                                                    buffer.slice(delimiterIndex + 1, i - delimiterIndex)
+                                            ).toString());
 
                                     StationReport report = threadSpecificReport
                                             .computeIfAbsent(stationName, StationReport::new);
