@@ -285,7 +285,7 @@ public class CalculateAverage_ShannonChristie {
 
     public static class StationReport {
         private final String stationName;
-        private double min, sum, max;
+        private double min = 99.9, sum, max = -99.9;
         private int count;
 
         public StationReport(String stationName) {
