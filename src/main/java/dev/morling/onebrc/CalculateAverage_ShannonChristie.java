@@ -117,10 +117,10 @@ public class CalculateAverage_ShannonChristie {
 
         ArrayList<ConcurrentHashMap<String, StationReport>> inProgressReports = new ArrayList<>(cores);
 
-        for (int i = 0; i < cores; i++) {
+        for (int threadI = 0; threadI < cores; threadI++) {
             inProgressReports.add(new ConcurrentHashMap<>());
 
-            final int THREAD_INDEX = i;
+            final int THREAD_INDEX = threadI;
 
             Thread t = new Thread(() -> {
                 ConcurrentHashMap<String, StationReport> threadSpecificReport = inProgressReports.get(THREAD_INDEX);
@@ -128,9 +128,9 @@ public class CalculateAverage_ShannonChristie {
                 try {
                     while (true) {
                         // If this takes more than 4 seconds, we either finished or something went wrong
-                        ArrayList<String> list = queue.poll(WORKER_TIMEOUT, TimeUnit.SECONDS);
+                        CharBuffer buffer = queue.poll(WORKER_TIMEOUT, TimeUnit.SECONDS);
 
-                        if (list == null) {
+                        if (buffer == null) {
                             System.out.println("Thread " + THREAD_INDEX + ": no more data");
 
                             if (!readerHasFinished) {
@@ -146,28 +146,36 @@ public class CalculateAverage_ShannonChristie {
 
                         Instant workerStart = Instant.now();
 
-                        list
-                                .stream()
-                                .forEach((String line) -> {
-                                    try {
-                                        int delimiterIndex = line.indexOf(";");
-                                        String stationName = line.substring(0, delimiterIndex);
-                                        double temperature = Double.parseDouble(line.substring(delimiterIndex + 1));
+                        int lastIndex = 0;
+                        int delimiterIndex = 0;
+                        for (int i = 0; i < buffer.limit(); i++) {
+                            // Walk through, track the most recent delimiter, and the last
+                            // successful new lines end index.
+                            try {
+                                if (buffer.get(i) == ';') {
+                                    delimiterIndex = i; // Track delimiter
+                                } else if (buffer.get(i) == '\n') { // Got a new line
+                                    // We expect that all lines are valid in terms of having
+                                    // a station name and a temperature.
+                                    String stationName = buffer.slice(lastIndex, delimiterIndex).toString();
+                                    double temperature = Double.parseDouble(
+                                            buffer.slice(delimiterIndex + 1, i).toString());
 
-                                        StationReport report = threadSpecificReport.get(stationName);
-                                        if (report == null) {
-                                            report = new StationReport(stationName);
-                                            threadSpecificReport.put(stationName, report);
-                                        }
+                                    StationReport report = threadSpecificReport
+                                            .computeIfAbsent(stationName, StationReport::new);
 
-                                        report.setSum(report.getSum() + temperature);
-                                        report.setCount(report.getCount() + 1);
-                                        report.setMax(Math.max(report.getMax(), temperature));
-                                        report.setMin(Math.min(report.getMin(), temperature));
-                                    } catch (NumberFormatException e) {
-                                        System.err.printf("Error parsing temperature in line: %s\n", line);
-                                    }
-                                });
+                                    report.setSum(report.getSum() + temperature);
+                                    report.setCount(report.getCount() + 1);
+                                    report.setMax(Math.max(report.getMax(), temperature));
+                                    report.setMin(Math.min(report.getMin(), temperature));
+
+                                    lastIndex = i + 1;
+                                }
+                            } catch (NumberFormatException e) {
+                                System.err.printf("Error parsing temperature in line: %s\n",
+                                        buffer.slice(lastIndex, i).toString());
+                            }
+                        }
 
                         System.out.printf("Worker %d: completed work item in %.2f seconds\n", THREAD_INDEX, (Instant.now().toEpochMilli() - workerStart.toEpochMilli()) / 1000.0);
                     }
