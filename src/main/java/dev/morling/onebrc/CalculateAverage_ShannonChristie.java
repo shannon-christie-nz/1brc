@@ -173,10 +173,10 @@ public class CalculateAverage_ShannonChristie {
                                     StationReport report = threadSpecificReport
                                             .computeIfAbsent(stationName, StationReport::new);
 
-                                    report.setSum(report.getSum() + temperature);
-                                    report.setCount(report.getCount() + 1);
-                                    report.setMax(Math.max(report.getMax(), temperature));
-                                    report.setMin(Math.min(report.getMin(), temperature));
+                                    report.sum = (report.sum + temperature);
+                                    report.count = (report.count + 1);
+                                    report.max = (Math.max(report.max, temperature));
+                                    report.min = (Math.min(report.min, temperature));
 
                                     lastIndex = i + 1;
                                 }
@@ -268,17 +268,17 @@ public class CalculateAverage_ShannonChristie {
                     reports.put(station.stationName, station);
                 }
 
-                station.setSum(station.getSum() + report.getSum());
-                station.setCount(station.getCount() + report.getCount());
-                station.setMax(Math.max(station.getMax(), report.getMax()));
-                station.setMin(Math.min(station.getMin(), report.getMin()));
+                station.sum = (station.sum + report.sum);
+                station.count = (station.count + report.count);
+                station.max = (Math.max(station.max, report.max));
+                station.min = (Math.min(station.min, report.min));
             });
         });
 
 //        System.out.println("Processed, about to output now.");
 
         reports.forEach((stationName, report) -> {
-            System.out.printf("%s=%.2f/%.2f/%.2f\n", stationName, report.getMin(), report.getSum() / report.getCount(), report.getMax());
+            System.out.printf("%s=%.2f/%.2f/%.2f\n", stationName, report.min, report.sum / report.count, report.max);
         });
 
         System.out.printf("Took %.4f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
@@ -291,42 +291,6 @@ public class CalculateAverage_ShannonChristie {
 
         public StationReport(String stationName) {
             this.stationName = stationName;
-        }
-
-        public String getStationName() {
-            return stationName;
-        }
-
-        public double getMin() {
-            return min;
-        }
-
-        public void setMin(double min) {
-            this.min = min;
-        }
-
-        public double getMax() {
-            return max;
-        }
-
-        public void setMax(double max) {
-            this.max = max;
-        }
-
-        public int getCount() {
-            return count;
-        }
-
-        public void setCount(int count) {
-            this.count = count;
-        }
-
-        public double getSum() {
-            return sum;
-        }
-
-        public void setSum(double sum) {
-            this.sum = sum;
         }
     }
 }
