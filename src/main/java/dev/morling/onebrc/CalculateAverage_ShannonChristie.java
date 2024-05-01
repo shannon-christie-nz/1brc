@@ -7,7 +7,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -51,14 +51,14 @@ public class CalculateAverage_ShannonChristie {
     //////////////////////////
     /// Auto-configuration ///
     //////////////////////////
-    private static final int cores = Math.max(1, Math.min(Runtime.getRuntime().availableProcessors() / 1, 15));
+    private static final int cores = Math.max(1, Math.min(Runtime.getRuntime().availableProcessors(), 15));
 
-    public static void main(String[] args) {
+    public static void main() {
         LinkedBlockingQueue<ByteBuffer> queue = new LinkedBlockingQueue<>(cores);
 
         startReaderThread(queue);
 
-        ArrayList<ConcurrentHashMap<String, StationReport>> inProgressReports =
+        ArrayList<HashMap<String, StationReport>> inProgressReports =
                 startWorkerThreads(queue);
 
         processAndOutputReports(inProgressReports);
@@ -122,18 +122,18 @@ public class CalculateAverage_ShannonChristie {
         }
     }
 
-    private static ArrayList<ConcurrentHashMap<String, StationReport>> startWorkerThreads(LinkedBlockingQueue<ByteBuffer> queue) {
+    private static ArrayList<HashMap<String, StationReport>> startWorkerThreads(LinkedBlockingQueue<ByteBuffer> queue) {
         CountDownLatch threadProcessingCompletionLatch = new CountDownLatch(cores);
 
-        ArrayList<ConcurrentHashMap<String, StationReport>> inProgressReports = new ArrayList<>(cores);
+        ArrayList<HashMap<String, StationReport>> inProgressReports = new ArrayList<>(cores);
 
         for (int threadI = 0; threadI < cores; threadI++) {
-            inProgressReports.add(new ConcurrentHashMap<>());
+            inProgressReports.add(new HashMap<>());
 
             final int THREAD_INDEX = threadI;
 
             Thread t = new Thread(() -> {
-                ConcurrentHashMap<String, StationReport> threadSpecificReport = inProgressReports.get(THREAD_INDEX);
+                HashMap<String, StationReport> threadSpecificReport = inProgressReports.get(THREAD_INDEX);
 
                 try {
                     while (true) {
@@ -141,18 +141,18 @@ public class CalculateAverage_ShannonChristie {
                         ByteBuffer buffer = queue.poll(WORKER_TIMEOUT, TimeUnit.SECONDS);
 
                         if (buffer == null) {
-//                            System.out.println("Thread " + THREAD_INDEX + ": no more data");
+//                            System.out.printf("Thread %d: no more data\n", THREAD_INDEX);
 
                             if (!readerHasFinished) {
-                                System.err.println("Thread " + THREAD_INDEX + ": reader hadn't finished");
+                                System.err.printf("Thread %d: reader hadn't finished\\n", THREAD_INDEX);
 
-                                throw new RuntimeException("Thread " + THREAD_INDEX + ": no more data yet reader hadn't finished");
+                                throw new RuntimeException(String.format("Thread %d: no more data yet reader hadn't finished", THREAD_INDEX));
                             }
 
                             break;
                         }
 
-//                        System.out.println("Thread " + THREAD_INDEX + ": got work item");
+//                        System.out.printf("Thread %d: got work item\n", THREAD_INDEX);
 
                         Instant workerStart = Instant.now();
 
@@ -251,10 +251,10 @@ public class CalculateAverage_ShannonChristie {
         return temperature / 10;
     }
 
-    private static void processAndOutputReports(ArrayList<ConcurrentHashMap<String, StationReport>> inProgressReports) {
+    private static void processAndOutputReports(ArrayList<HashMap<String, StationReport>> inProgressReports) {
 //        System.out.println("Processing the data");
 
-        ConcurrentHashMap<String, StationReport> reports = new ConcurrentHashMap<>(10_000);
+        HashMap<String, StationReport> reports = new HashMap<>(10_000);
 
         inProgressReports.forEach((threadMap) -> {
 //            System.out.println("Got thread map, processing");
@@ -277,9 +277,8 @@ public class CalculateAverage_ShannonChristie {
 
 //        System.out.println("Processed, about to output now.");
 
-        reports.forEach((stationName, report) -> {
-            System.out.printf("%s=%.2f/%.2f/%.2f\n", stationName, report.min, report.sum / report.count, report.max);
-        });
+        reports.forEach((stationName, report) ->
+            System.out.printf("%s=%.2f/%.2f/%.2f\n", stationName, report.min, report.sum / report.count, report.max));
 
         System.out.printf("Took %.4f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
     }
