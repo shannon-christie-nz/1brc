@@ -26,6 +26,8 @@ import java.util.concurrent.TimeUnit;
  * f722624b8c3ffa63c2a7b1936bcfec5846a79f08 - 1r~4w. BR, 10 million/batch. Took ~68 seconds.
  * 5efb0d63ebe89adc77830773dcf911fc0dc78f4d - 1r~4w. BR, Read to buffer 10m bytes. Took ~120 seconds.
  * 368ff01cbfa3777d55377cb923b09f02a679c033 - "". "", "" 100m bytes. Took ~117 seconds
+ * 37091ca3524816d763e55697a12607420f9d3228 - "". FileInputChannel, to 100m bytes buffer. Workers decode buffer and work directly. No Strings for new lines. Took ~56 seconds.
+ *
  * */
 public class CalculateAverage_ShannonChristie {
     private static volatile boolean readerHasFinished = false;
@@ -42,7 +44,7 @@ public class CalculateAverage_ShannonChristie {
     //////////////////////////
     /// Auto-configuration ///
     //////////////////////////
-    private static final int cores = Math.max(1, Math.min(Runtime.getRuntime().availableProcessors() / 2, 4));
+    private static final int cores = Math.max(1, Math.min(Runtime.getRuntime().availableProcessors() / 2, 7));
 
     public static void main(String[] args) {
         LinkedBlockingQueue<ByteBuffer> queue = new LinkedBlockingQueue<>(cores);
