@@ -47,6 +47,7 @@ public class CalculateAverage_ShannonChristie {
     private static final int BUFFER_SIZE = 10_000_000;
     private static final int READER_TIMEOUT = 2;
     private static final int WORKER_TIMEOUT = 1;
+    private static final LogLevel LOG_LEVEL = LogLevel.NONE;
 
     //////////////////////////
     /// Auto-configuration ///
@@ -70,7 +71,9 @@ public class CalculateAverage_ShannonChristie {
 
         readerThread.start();
 
-//        System.out.println("Reader thread started");
+        if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
+            System.out.println("Reader thread started");
+        }
     }
 
     private static void readMeasurementsToQueue(LinkedBlockingQueue<ByteBuffer> queue) {
@@ -78,7 +81,7 @@ public class CalculateAverage_ShannonChristie {
                      FileChannel.open(Path.of("./measurements.txt"), StandardOpenOption.READ)) {
             ByteBuffer byteBuffer;
             while (inputFileChannel.read(byteBuffer = ByteBuffer.allocate(BUFFER_SIZE)) != -1) {
-//                Instant readerStart = Instant.now();
+                Instant readerStart = Instant.now();
 
                 // Let's read backwards to find the last complete line
                 for (int i = 0; i < 100; i++) {
@@ -101,14 +104,18 @@ public class CalculateAverage_ShannonChristie {
                             (byteBuffer.capacity() - byteBuffer.limit()));// Seek back the difference
                 }
 
-//                System.out.printf("Reader: read in %.2f seconds\n", (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
+                if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
+                    System.out.printf("Reader: read in %.2f seconds\n", (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
+                }
 
                 // If workers can't complete a batch in 20 seconds when we start to block
                 // something must've gone wrong.
                 queue.offer(byteBuffer, READER_TIMEOUT, TimeUnit.SECONDS);
             }
 
-//            System.out.printf("Reader: finished at %.2f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
+            if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
+                System.out.printf("Reader: finished at %.2f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
+            }
         } catch (IOException ex) {
             System.err.println("Reader: error reading file");
 
@@ -141,10 +148,14 @@ public class CalculateAverage_ShannonChristie {
                         ByteBuffer buffer = queue.poll(WORKER_TIMEOUT, TimeUnit.SECONDS);
 
                         if (buffer == null) {
-//                            System.out.printf("Thread %d: no more data\n", THREAD_INDEX);
+                            if (LOG_LEVEL.ordinal() <= LogLevel.WARNING.ordinal()) {
+                                System.out.printf("Thread %d: no more data\n", THREAD_INDEX);
+                            }
 
                             if (!readerHasFinished) {
-                                System.err.printf("Thread %d: reader hadn't finished\\n", THREAD_INDEX);
+                                if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
+                                    System.err.printf("Thread %d: reader hadn't finished\\n", THREAD_INDEX);
+                                }
 
                                 throw new RuntimeException(String.format("Thread %d: no more data yet reader hadn't finished", THREAD_INDEX));
                             }
@@ -152,9 +163,11 @@ public class CalculateAverage_ShannonChristie {
                             break;
                         }
 
-//                        System.out.printf("Thread %d: got work item\n", THREAD_INDEX);
+                        if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
+                            System.out.printf("Thread %d: got work item\n", THREAD_INDEX);
+                        }
 
-//                        Instant workerStart = Instant.now();
+                        Instant workerStart = Instant.now();
 
                         int lastIndex = 0;
                         int delimiterIndex = 0;
@@ -186,7 +199,9 @@ public class CalculateAverage_ShannonChristie {
                             }
                         }
 
-//                        System.out.printf("Worker %d: completed work item in %.2f seconds\n", THREAD_INDEX, (Instant.now().toEpochMilli() - workerStart.toEpochMilli()) / 1000.0);
+                        if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
+                            System.out.printf("Worker %d: completed work item in %.2f seconds\n", THREAD_INDEX, (Instant.now().toEpochMilli() - workerStart.toEpochMilli()) / 1000.0);
+                        }
                     }
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);
@@ -199,7 +214,9 @@ public class CalculateAverage_ShannonChristie {
             t.start();
         }
 
-//        System.out.printf("All threads spawned. %d threads\n", cores);
+        if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
+            System.out.printf("All threads spawned. %d threads\n", cores);
+        }
 
         try {
             if (!threadProcessingCompletionLatch.await(180, TimeUnit.SECONDS)) {
@@ -210,6 +227,7 @@ public class CalculateAverage_ShannonChristie {
 
             throw new RuntimeException(e);
         }
+
         return inProgressReports;
     }
 
@@ -252,12 +270,16 @@ public class CalculateAverage_ShannonChristie {
     }
 
     private static void processAndOutputReports(ArrayList<HashMap<String, StationReport>> inProgressReports) {
-//        System.out.println("Processing the data");
+        if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
+            System.out.println("Processing the data");
+        }
 
         HashMap<String, StationReport> reports = new HashMap<>(10_000);
 
         inProgressReports.forEach((threadMap) -> {
-//            System.out.println("Got thread map, processing");
+            if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
+                System.out.println("Got thread map, processing");
+            }
 
             threadMap.forEach((ignored, report) -> {
                 StationReport station = reports.get(report.stationName);
@@ -275,7 +297,9 @@ public class CalculateAverage_ShannonChristie {
             });
         });
 
-//        System.out.println("Processed, about to output now.");
+        if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
+            System.out.println("Processed, about to output now.");
+        }
 
         reports.forEach((stationName, report) ->
             System.out.printf("%s=%.2f/%.2f/%.2f\n", stationName, report.min, report.sum / report.count, report.max));
@@ -291,5 +315,13 @@ public class CalculateAverage_ShannonChristie {
         public StationReport(String stationName) {
             this.stationName = stationName;
         }
+    }
+
+    public enum LogLevel {
+        TRACE,
+        INFO,
+        WARNING,
+        ERROR,
+        NONE,
     }
 }
