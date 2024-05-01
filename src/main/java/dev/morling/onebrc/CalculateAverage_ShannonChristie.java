@@ -32,6 +32,7 @@ import java.util.concurrent.TimeUnit;
  * 4ff30825f45578b171d5cd56ce886e914c03e323 - competition 1r~7w. "". Took ~43 seconds. - No major delays from disk IO.
  * 93caf58f7102f0e882d7f7556c440d3bf6e54944 - "". "". Reduce timeouts. Took ~36 seconds.
  * 2ccc7ce5f50438b11578b41541298c732da212dc - "". "". Reduce timeouts again and reduce buffer size to 10 million. Took ~35 seconds.
+ * 9610561e8ff722ebf1bf0acb7a93f769dca5f73e - "". Custom rolled temperature parsing without encoding and parsing. Took ~20 seconds.
  * */
 public class CalculateAverage_ShannonChristie {
     private static volatile boolean readerHasFinished = false;
