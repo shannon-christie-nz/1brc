@@ -278,7 +278,7 @@ public class CalculateAverage_ShannonChristie {
 //        System.out.println("Processed, about to output now.");
 
         reports.forEach((stationName, report) -> {
-            System.out.printf("%s=%.2f/%.2f/%.2f\n", stationName, report.getMin(), (report.getMax() - report.getMin()) / 2, report.getMax());
+            System.out.printf("%s=%.2f/%.2f/%.2f\n", stationName, report.getMin(), report.getSum() / report.getCount(), report.getMax());
         });
 
         System.out.printf("Took %.4f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
