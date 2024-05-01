@@ -75,8 +75,10 @@ public class CalculateAverage_ShannonChristie {
                 for (int i = 0; i < 100; i++) {
                     int readIndex = charBuffer.capacity() - i;
 
-                    if (charBuffer.get(readIndex) == '\n') {
+                    if (charBuffer.get(readIndex - 1) == '\n') {
                         charBuffer.limit(readIndex); // Reduce limit to last valid line
+
+                        break; // We can move on now.
                     }
                 }
 
@@ -86,6 +88,7 @@ public class CalculateAverage_ShannonChristie {
                     // the incomplete line.
 
                     // Position returns the channel itself. It's not creating a new one.
+                    // NOTE - Doesn't reset the reader, reader continues from previous position
                     fileInputStream.getChannel().position(
                             fileInputStream.getChannel().position() -
                                     charBuffer.capacity() - charBuffer.limit()); // Seek back the difference
@@ -159,7 +162,7 @@ public class CalculateAverage_ShannonChristie {
                                     // a station name and a temperature.
                                     String stationName = buffer.slice(lastIndex, delimiterIndex).toString();
                                     double temperature = Double.parseDouble(
-                                            buffer.slice(delimiterIndex + 1, i).toString());
+                                            buffer.slice(delimiterIndex + 1, i - delimiterIndex).toString());
 
                                     StationReport report = threadSpecificReport
                                             .computeIfAbsent(stationName, StationReport::new);
