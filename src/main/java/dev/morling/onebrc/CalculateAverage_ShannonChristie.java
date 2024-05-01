@@ -34,6 +34,7 @@ import java.util.concurrent.TimeUnit;
  * 9610561e8ff722ebf1bf0acb7a93f769dca5f73e - "". Custom rolled temperature parsing without decoding and parsing. Took ~20 seconds.
  * e27e1a2f93bc4e10325b34587e7cea14fc10621d - "". Custom rolled name parsing without decoding. Took ~15 seconds.
  * 96dcc26897a0a771afd369b493074bb1f4dbcdb4 - 1r15w. "". Took ~12 seconds.
+ * c235e14351eb2d8f701dbf208e89fe50c4ecca14 - "". Disable most logging. Took ~12 seconds.
  * */
 public class CalculateAverage_ShannonChristie {
     private static volatile boolean readerHasFinished = false;
@@ -214,13 +215,14 @@ public class CalculateAverage_ShannonChristie {
 
     private static String getStationNameString(int delimiterIndex, int lastIndex, ByteBuffer buffer) {
         int length = delimiterIndex - lastIndex;
+
         char[] charArrayBuffer = new char[length];
+
         for (int j = 0; j < length; j++) {
             charArrayBuffer[j] = (char) buffer.get(lastIndex + j);
         }
 
-        String stationName = String.valueOf(charArrayBuffer);
-        return stationName;
+        return String.valueOf(charArrayBuffer);
     }
 
     private static double getTemperatureDouble(ByteBuffer buffer, int delimiterIndex, int i) {
