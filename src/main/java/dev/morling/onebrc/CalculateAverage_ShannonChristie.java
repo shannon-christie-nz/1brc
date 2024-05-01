@@ -33,6 +33,7 @@ import java.util.concurrent.TimeUnit;
  * 2ccc7ce5f50438b11578b41541298c732da212dc - "". "". Reduce timeouts again and reduce buffer size to 10 million. Took ~35 seconds.
  * 9610561e8ff722ebf1bf0acb7a93f769dca5f73e - "". Custom rolled temperature parsing without decoding and parsing. Took ~20 seconds.
  * e27e1a2f93bc4e10325b34587e7cea14fc10621d - "". Custom rolled name parsing without decoding. Took ~15 seconds.
+ * 96dcc26897a0a771afd369b493074bb1f4dbcdb4 - 1r15w. "". Took ~12 seconds.
  * */
 public class CalculateAverage_ShannonChristie {
     private static volatile boolean readerHasFinished = false;
@@ -68,7 +69,7 @@ public class CalculateAverage_ShannonChristie {
 
         readerThread.start();
 
-        System.out.println("Reader thread started");
+//        System.out.println("Reader thread started");
     }
 
     private static void readMeasurementsToQueue(LinkedBlockingQueue<ByteBuffer> queue) {
@@ -99,14 +100,14 @@ public class CalculateAverage_ShannonChristie {
                             (byteBuffer.capacity() - byteBuffer.limit()));// Seek back the difference
                 }
 
-                System.out.printf("Reader: read in %.2f seconds\n", (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
+//                System.out.printf("Reader: read in %.2f seconds\n", (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
 
                 // If workers can't complete a batch in 20 seconds when we start to block
                 // something must've gone wrong.
                 queue.offer(byteBuffer, READER_TIMEOUT, TimeUnit.SECONDS);
             }
 
-            System.out.printf("Reader: finished at %.2f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
+//            System.out.printf("Reader: finished at %.2f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
         } catch (IOException ex) {
             System.err.println("Reader: error reading file");
 
@@ -139,7 +140,7 @@ public class CalculateAverage_ShannonChristie {
                         ByteBuffer buffer = queue.poll(WORKER_TIMEOUT, TimeUnit.SECONDS);
 
                         if (buffer == null) {
-                            System.out.println("Thread " + THREAD_INDEX + ": no more data");
+//                            System.out.println("Thread " + THREAD_INDEX + ": no more data");
 
                             if (!readerHasFinished) {
                                 System.err.println("Thread " + THREAD_INDEX + ": reader hadn't finished");
@@ -150,7 +151,7 @@ public class CalculateAverage_ShannonChristie {
                             break;
                         }
 
-                        System.out.println("Thread " + THREAD_INDEX + ": got work item");
+//                        System.out.println("Thread " + THREAD_INDEX + ": got work item");
 
                         Instant workerStart = Instant.now();
 
@@ -184,7 +185,7 @@ public class CalculateAverage_ShannonChristie {
                             }
                         }
 
-                        System.out.printf("Worker %d: completed work item in %.2f seconds\n", THREAD_INDEX, (Instant.now().toEpochMilli() - workerStart.toEpochMilli()) / 1000.0);
+//                        System.out.printf("Worker %d: completed work item in %.2f seconds\n", THREAD_INDEX, (Instant.now().toEpochMilli() - workerStart.toEpochMilli()) / 1000.0);
                     }
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);
@@ -197,7 +198,7 @@ public class CalculateAverage_ShannonChristie {
             t.start();
         }
 
-        System.out.printf("All threads spawned. %d threads\n", cores);
+//        System.out.printf("All threads spawned. %d threads\n", cores);
 
         try {
             if (!threadProcessingCompletionLatch.await(180, TimeUnit.SECONDS)) {
@@ -249,12 +250,12 @@ public class CalculateAverage_ShannonChristie {
     }
 
     private static void processAndOutputReports(ArrayList<ConcurrentHashMap<String, StationReport>> inProgressReports) {
-        System.out.println("Processing the data");
+//        System.out.println("Processing the data");
 
         ConcurrentHashMap<String, StationReport> reports = new ConcurrentHashMap<>(10_000);
 
         inProgressReports.forEach((threadMap) -> {
-            System.out.println("Got thread map, processing");
+//            System.out.println("Got thread map, processing");
 
             threadMap.forEach((ignored, report) -> {
                 StationReport station = reports.get(report.stationName);
@@ -272,7 +273,7 @@ public class CalculateAverage_ShannonChristie {
             });
         });
 
-        System.out.println("Processed, about to output now.");
+//        System.out.println("Processed, about to output now.");
 
         reports.forEach((stationName, report) -> {
             System.out.printf("%s=%.2f/%.2f/%.2f\n", stationName, report.getMin(), (report.getMax() - report.getMin()) / 2, report.getMax());
