@@ -30,7 +30,7 @@ import java.util.concurrent.TimeUnit;
  * 57818dec1507fd3908441bec6a60ffa5f5f7784e - 1r~7w. "" "" "". Took ~42 seconds.
  * 200c564dc56729dfb7671a2aa53bd287ed51eb6b - 1r~15w. "" "" "". Took ~47 seconds.
  * 4ff30825f45578b171d5cd56ce886e914c03e323 - competition 1r~7w. "". Took ~43 seconds. - No major delays from disk IO.
- *
+ * 93caf58f7102f0e882d7f7556c440d3bf6e54944 - "". "". Reduce timeouts. Took ~36 seconds.
  * */
 public class CalculateAverage_ShannonChristie {
     private static volatile boolean readerHasFinished = false;
