@@ -49,7 +49,7 @@ public class CalculateAverage_ShannonChristie {
     //////////////////////////
     /// Auto-configuration ///
     //////////////////////////
-    private static final int cores = Math.max(1, Math.min(Runtime.getRuntime().availableProcessors() / 2, 7));
+    private static final int cores = Math.max(1, Math.min(Runtime.getRuntime().availableProcessors() / 1, 15));
 
     public static void main(String[] args) {
         LinkedBlockingQueue<ByteBuffer> queue = new LinkedBlockingQueue<>(cores);
