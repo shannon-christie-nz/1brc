@@ -167,10 +167,8 @@ public class CalculateAverage_ShannonChristie {
                                     String stationName = StandardCharsets.ISO_8859_1.decode(
                                             buffer.slice(lastIndex, delimiterIndex - lastIndex)
                                     ).toString();
-                                    double temperature = Double.parseDouble(
-                                            StandardCharsets.ISO_8859_1.decode(
-                                                    buffer.slice(delimiterIndex + 1, i - delimiterIndex)
-                                            ).toString());
+
+                                    double temperature = getTemperatureDouble(buffer, delimiterIndex, i);
 
                                     StationReport report = threadSpecificReport
                                             .computeIfAbsent(stationName, StationReport::new);
@@ -213,6 +211,32 @@ public class CalculateAverage_ShannonChristie {
             throw new RuntimeException(e);
         }
         return inProgressReports;
+    }
+
+    private static double getTemperatureDouble(ByteBuffer buffer, int delimiterIndex, int i) {
+        double temperature = 0;
+        boolean negative = false;
+        ByteBuffer temperatureBuffer = buffer.slice(delimiterIndex + 1, i - delimiterIndex - 1);
+        for (int j = 0; j < temperatureBuffer.limit(); j++) {
+            byte value = temperatureBuffer.get(j);
+            if (value == '.') {
+                continue;
+            }
+
+            if (value == '-') {
+                negative = true;
+
+                continue;
+            }
+
+            temperature = temperature * 10 + (value - '0');
+        }
+
+        if (negative) {
+            temperature = -temperature;
+        }
+
+        return temperature / 10;
     }
 
     private static void processAndOutputReports(ArrayList<ConcurrentHashMap<String, StationReport>> inProgressReports) {
