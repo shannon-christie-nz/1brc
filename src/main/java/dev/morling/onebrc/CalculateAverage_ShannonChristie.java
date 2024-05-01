@@ -78,7 +78,7 @@ public class CalculateAverage_ShannonChristie {
                      FileChannel.open(Path.of("./measurements.txt"), StandardOpenOption.READ)) {
             ByteBuffer byteBuffer;
             while (inputFileChannel.read(byteBuffer = ByteBuffer.allocate(BUFFER_SIZE)) != -1) {
-                Instant readerStart = Instant.now();
+//                Instant readerStart = Instant.now();
 
                 // Let's read backwards to find the last complete line
                 for (int i = 0; i < 100; i++) {
@@ -154,7 +154,7 @@ public class CalculateAverage_ShannonChristie {
 
 //                        System.out.printf("Thread %d: got work item\n", THREAD_INDEX);
 
-                        Instant workerStart = Instant.now();
+//                        Instant workerStart = Instant.now();
 
                         int lastIndex = 0;
                         int delimiterIndex = 0;
