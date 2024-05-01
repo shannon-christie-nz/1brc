@@ -1,10 +1,10 @@
 package dev.morling.onebrc;
 
 import java.io.BufferedReader;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.CharBuffer;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
@@ -64,7 +64,9 @@ public class CalculateAverage_ShannonChristie {
     }
 
     private static void readMeasurementsToQueue(LinkedBlockingQueue<CharBuffer> queue) {
-        try (BufferedReader reader = Files.newBufferedReader(Path.of("./measurements.txt"))) {
+        try (FileInputStream fileInputStream = new FileInputStream("./measurements.txt");
+                BufferedReader reader = new BufferedReader(new InputStreamReader(fileInputStream))) {
+
             CharBuffer charBuffer;
             while (reader.read(charBuffer = CharBuffer.allocate(BUFFER_SIZE)) != -1) {
                 Instant readerStart = Instant.now();
@@ -83,7 +85,10 @@ public class CalculateAverage_ShannonChristie {
                     // the next read works as intended... i.e. continuing at the start of
                     // the incomplete line.
 
-                    // TODO seek back on input stream for next .read(...)
+                    // Position returns the channel itself. It's not creating a new one.
+                    fileInputStream.getChannel().position(
+                            fileInputStream.getChannel().position() -
+                                    charBuffer.capacity() - charBuffer.limit()); // Seek back the difference
                 }
 
                 System.out.printf("Reader: read in %.2f seconds\n", (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
