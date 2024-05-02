@@ -20,6 +20,7 @@ import static java.util.stream.Collectors.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Instant;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.stream.Collector;
@@ -53,6 +54,8 @@ public class CalculateAverage_baseline {
     }
 
     public static void main(String[] args) throws IOException {
+        Instant start = Instant.now();
+
         // Map<String, Double> measurements1 = Files.lines(Paths.get(FILE))
         // .map(l -> l.split(";"))
         // .collect(groupingBy(m -> m[0], averagingDouble(m -> Double.parseDouble(m[1]))));
@@ -88,5 +91,7 @@ public class CalculateAverage_baseline {
                 .collect(groupingBy(m -> m.station(), collector)));
 
         System.out.println(measurements);
+
+        System.out.printf("Took %.4f", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
     }
 }

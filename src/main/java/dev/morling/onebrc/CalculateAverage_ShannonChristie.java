@@ -12,7 +12,15 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
-/**
+/*
+ * Everything is run on the exact same measurements.txt
+ * Machine is Ryzen 7 5800X, 32 GB ram at 3600mhz (downclock from 3800mhz), PCI-e 4 M.2 NVMe 2tb Samsung 980 pro
+ * Running Elementary OS, built and using IntelliJ with JDK 21 x64.
+ *
+ * Baseline run 1 on my machine - Took ~158 seconds
+ * Baseline run 2 on my machine - Took ~170 seconds
+ * Baseline run 3 on my machine - Took ~152 seconds
+ *
  * e92283e54e6e6e930ff8500841a68a6c057f865c - Serial using streams, lines -> forEach. CHM -> forEach took ~135 seconds.
  * be07811561db261f029f42deb33a0c612f3a4b76 - Multithreaded processing v1 with serial preprocessing v0.1. Output mechanism incomplete. Dies on memory usage.
  * 2b7a6e7b9fe6dce7fab14bc7ced015aa0a544248 - Multithreaded processing v2 (thread per core) with serial reader thread. Using blocking work queue. Output complete. No memory death. Took ~56 seconds
