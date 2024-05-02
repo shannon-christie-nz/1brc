@@ -43,6 +43,7 @@ import java.util.concurrent.TimeUnit;
  * e27e1a2f93bc4e10325b34587e7cea14fc10621d - "". Custom rolled name parsing without decoding. Took ~15 seconds.
  * 96dcc26897a0a771afd369b493074bb1f4dbcdb4 - 1r15w. "". Took ~12 seconds.
  * c235e14351eb2d8f701dbf208e89fe50c4ecca14 - "". Disable most logging. Took ~12 seconds.
+ *
  * */
 public class CalculateAverage_ShannonChristie {
     private static volatile boolean readerHasFinished = false;
@@ -191,8 +192,13 @@ public class CalculateAverage_ShannonChristie {
                                     String stationName = getStationNameString(delimiterIndex, lastIndex, buffer);
                                     double temperature = getTemperatureDouble(buffer, delimiterIndex, i);
 
-                                    StationReport report = threadSpecificReport
-                                            .computeIfAbsent(stationName, StationReport::new);
+                                    StationReport report = threadSpecificReport.get(stationName);
+
+                                    if (report == null) {
+                                        report = new StationReport(stationName);
+
+                                        threadSpecificReport.put(stationName, report);
+                                    }
 
                                     report.sum = (report.sum + temperature);
                                     report.count = (report.count + 1);
