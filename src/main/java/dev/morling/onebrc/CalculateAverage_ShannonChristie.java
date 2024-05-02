@@ -1,13 +1,13 @@
 package dev.morling.onebrc;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.nio.CharBuffer;
-import java.nio.file.Files;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -25,204 +25,97 @@ import java.util.concurrent.TimeUnit;
  * f722624b8c3ffa63c2a7b1936bcfec5846a79f08 - 1r~4w. BR, 10 million/batch. Took ~68 seconds.
  * 5efb0d63ebe89adc77830773dcf911fc0dc78f4d - 1r~4w. BR, Read to buffer 10m bytes. Took ~120 seconds.
  * 368ff01cbfa3777d55377cb923b09f02a679c033 - "". "", "" 100m bytes. Took ~117 seconds
+ * 37091ca3524816d763e55697a12607420f9d3228 - "". FileInputChannel, to 100m bytes buffer. Workers decode buffer and work directly. No Strings for new lines. Took ~56 seconds.
+ * 57818dec1507fd3908441bec6a60ffa5f5f7784e - 1r~7w. "" "" "". Took ~42 seconds.
+ * 200c564dc56729dfb7671a2aa53bd287ed51eb6b - 1r~15w. "" "" "". Took ~47 seconds.
+ * 4ff30825f45578b171d5cd56ce886e914c03e323 - competition 1r~7w. "". Took ~43 seconds. - No major delays from disk IO.
+ * 93caf58f7102f0e882d7f7556c440d3bf6e54944 - "". "". Reduce timeouts. Took ~36 seconds.
+ * 2ccc7ce5f50438b11578b41541298c732da212dc - "". "". Reduce timeouts again and reduce buffer size to 10 million. Took ~35 seconds.
+ * 9610561e8ff722ebf1bf0acb7a93f769dca5f73e - "". Custom rolled temperature parsing without decoding and parsing. Took ~20 seconds.
+ * e27e1a2f93bc4e10325b34587e7cea14fc10621d - "". Custom rolled name parsing without decoding. Took ~15 seconds.
+ * 96dcc26897a0a771afd369b493074bb1f4dbcdb4 - 1r15w. "". Took ~12 seconds.
+ * c235e14351eb2d8f701dbf208e89fe50c4ecca14 - "". Disable most logging. Took ~12 seconds.
  * */
 public class CalculateAverage_ShannonChristie {
-    public static boolean readerHasFinished = false;
+    private static volatile boolean readerHasFinished = false;
 
-    public static void main(String[] args) {
-        Instant start = Instant.now();
+    private static final Instant start = Instant.now();
 
-        /////////////////////
-        /// Configuration ///
-        /////////////////////
-        final int BATCH_SIZE = 100_000_000;
-        final int READER_TIMEOUT = 20;
-        final int WORKER_TIMEOUT = 6;
+    /////////////////////
+    /// Configuration ///
+    /////////////////////
+    private static final int BUFFER_SIZE = 10_000_000;
+    private static final int READER_TIMEOUT = 2;
+    private static final int WORKER_TIMEOUT = 1;
+    private static final LogLevel LOG_LEVEL = LogLevel.NONE;
 
-        //////////////////////////
-        /// Auto-configuration ///
-        //////////////////////////
-        Runtime runtime = Runtime.getRuntime();
-        int cores = Math.max(1, Math.min(runtime.availableProcessors() / 2, 4));
+    //////////////////////////
+    /// Auto-configuration ///
+    //////////////////////////
+    private static final int cores = Math.max(1, Math.min(Runtime.getRuntime().availableProcessors(), 15));
 
-        LinkedBlockingQueue<ArrayList<String>> queue = new LinkedBlockingQueue<>(cores);
+    public static void main() {
+        LinkedBlockingQueue<ByteBuffer> queue = new LinkedBlockingQueue<>(cores);
 
-        startReaderThread(BATCH_SIZE, queue, READER_TIMEOUT, start);
+        startReaderThread(queue);
 
-        ArrayList<ConcurrentHashMap<String, StationReport>> inProgressReports =
-                startWorkerThreads(cores, queue, WORKER_TIMEOUT);
+        ArrayList<HashMap<String, StationReport>> inProgressReports =
+                startWorkerThreads(queue);
 
         processAndOutputReports(inProgressReports);
-
-        System.out.printf("Took %.4f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
     }
 
-    private static ArrayList<ConcurrentHashMap<String, StationReport>> startWorkerThreads(int cores, LinkedBlockingQueue<ArrayList<String>> queue, int WORKER_TIMEOUT) {
-        CountDownLatch threadProcessingCompletionLatch = new CountDownLatch(cores);
-
-        ArrayList<ConcurrentHashMap<String, StationReport>> inProgressReports = new ArrayList<>(cores);
-
-        for (int i = 0; i < cores; i++) {
-            inProgressReports.add(new ConcurrentHashMap<>());
-
-            final int THREAD_INDEX = i;
-
-            Thread t = new Thread(() -> {
-                ConcurrentHashMap<String, StationReport> threadSpecificReport = inProgressReports.get(THREAD_INDEX);
-
-                try {
-                    while (true) {
-                        // If this takes more than 4 seconds, we either finished or something went wrong
-                        ArrayList<String> list = queue.poll(WORKER_TIMEOUT, TimeUnit.SECONDS);
-
-                        if (list == null) {
-                            System.out.println("Thread " + THREAD_INDEX + ": no more data");
-
-                            if (!readerHasFinished) {
-                                System.err.println("Thread " + THREAD_INDEX + ": reader hadn't finished");
-
-                                throw new RuntimeException("Thread " + THREAD_INDEX + ": no more data yet reader hadn't finished");
-                            }
-
-                            break;
-                        }
-
-                        System.out.println("Thread " + THREAD_INDEX + ": got work item");
-
-                        Instant workerStart = Instant.now();
-
-                        list
-                                .stream()
-                                .forEach((String line) -> {
-                                    try {
-                                        int delimiterIndex = line.indexOf(";");
-                                        String stationName = line.substring(0, delimiterIndex);
-                                        double temperature = Double.parseDouble(line.substring(delimiterIndex + 1));
-
-                                        StationReport report = threadSpecificReport.get(stationName);
-                                        if (report == null) {
-                                            report = new StationReport(stationName);
-                                            threadSpecificReport.put(stationName, report);
-                                        }
-
-                                        report.setSum(report.getSum() + temperature);
-                                        report.setCount(report.getCount() + 1);
-                                        report.setMax(Math.max(report.getMax(), temperature));
-                                        report.setMin(Math.min(report.getMin(), temperature));
-                                    } catch (NumberFormatException e) {
-                                        System.err.printf("Error parsing temperature in line: %s\n", line);
-                                    }
-                                });
-
-                        System.out.printf("Worker %d: completed work item in %.2f seconds\n", THREAD_INDEX, (Instant.now().toEpochMilli() - workerStart.toEpochMilli()) / 1000.0);
-                    }
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                } finally {
-                    // We completed all of our data, or something else went wrong
-                    threadProcessingCompletionLatch.countDown();
-                }
-            });
-
-            t.start();
-        }
-
-        System.out.printf("All threads spawned. %d threads\n", cores);
-
-        try {
-            if (!threadProcessingCompletionLatch.await(180, TimeUnit.SECONDS)) {
-                throw new RuntimeException("Timed out waiting for thread processing completion.");
-            }
-        } catch (InterruptedException e) {
-            System.err.println("Interrupted while waiting for thread processing completion");
-
-            throw new RuntimeException(e);
-        }
-        return inProgressReports;
-    }
-
-    private static void processAndOutputReports(ArrayList<ConcurrentHashMap<String, StationReport>> inProgressReports) {
-        System.out.println("Processing the data");
-
-        ConcurrentHashMap<String, StationReport> reports = new ConcurrentHashMap<>(10_000);
-
-        inProgressReports.forEach((threadMap) -> {
-            System.out.println("Got thread map, processing");
-
-            threadMap.forEach((ignored, report) -> {
-                StationReport station = reports.get(report.stationName);
-
-                if (station == null) {
-                    station = new StationReport(report.stationName);
-
-                    reports.put(station.stationName, station);
-                }
-
-                station.setSum(station.getSum() + report.getSum());
-                station.setCount(station.getCount() + report.getCount());
-                station.setMax(Math.max(station.getMax(), report.getMax()));
-                station.setMin(Math.min(station.getMin(), report.getMin()));
-            });
-        });
-
-        System.out.println("Processed, about to output now.");
-
-        reports.forEach((stationName, report) -> {
-            System.out.printf("%s=%.2f/%.2f/%.2f\n", stationName, report.getMin(), (report.getMax() - report.getMin()) / 2, report.getMax());
-        });
-    }
-
-    private static void startReaderThread(int BATCH_SIZE, LinkedBlockingQueue<ArrayList<String>> queue, int READER_TIMEOUT, Instant start) {
+    private static void startReaderThread(LinkedBlockingQueue<ByteBuffer> queue) {
         Thread readerThread = new Thread(() ->
-            readMeasurementsToQueue(BATCH_SIZE, queue, READER_TIMEOUT, start));
+            readMeasurementsToQueue(queue));
 
         readerThread.start();
 
-        System.out.println("Reader thread started");
+        if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
+            System.out.println("Reader thread started");
+        }
     }
 
-    private static void readMeasurementsToQueue(int BATCH_SIZE, LinkedBlockingQueue<ArrayList<String>> queue, int READER_TIMEOUT, Instant start) {
-        try (BufferedReader reader = Files.newBufferedReader(Path.of("./measurements.txt"))) {
-            CharBuffer charBuffer = CharBuffer.allocate(BATCH_SIZE);
-            String carryOverLine = null;
-
-            int read;
-            while ((read = reader.read(charBuffer)) != -1) {
+    private static void readMeasurementsToQueue(LinkedBlockingQueue<ByteBuffer> queue) {
+        try (FileChannel inputFileChannel =
+                     FileChannel.open(Path.of("./measurements.txt"), StandardOpenOption.READ)) {
+            ByteBuffer byteBuffer;
+            while (inputFileChannel.read(byteBuffer = ByteBuffer.allocate(BUFFER_SIZE)) != -1) {
                 Instant readerStart = Instant.now();
 
-                ArrayList<String> lines = new ArrayList<>(BATCH_SIZE);
+                // Let's read backwards to find the last complete line
+                for (int i = 0; i < 100; i++) {
+                    int readIndex = byteBuffer.capacity() - i;
 
-                int lastRead = 0;
-                for (int i = 0; i < read; i++) {
-                    if (charBuffer.get(i) == '\n') {
-                        CharBuffer lineBuffer = charBuffer.slice(lastRead, i - lastRead);
+                    if (byteBuffer.get(readIndex - 1) == '\n') {
+                        byteBuffer.limit(readIndex); // Reduce limit to last valid line
 
-                        if (carryOverLine == null) {
-                            lines.add(lineBuffer.toString());
-                        } else {
-                            lines.add(carryOverLine + lineBuffer.toString());
-                            carryOverLine = null;
-                        }
-
-                        lastRead = i + 1;
+                        break; // We can move on now.
                     }
                 }
 
-                if (lastRead != read) {
-                    // We didn't complete a line
-                    carryOverLine = charBuffer.slice(lastRead, read - lastRead).toString();
+                if (byteBuffer.limit() != byteBuffer.capacity()) {
+                    // We didn't complete a line, we need to track this change for ensuring
+                    // the next read works as intended... i.e. continuing at the start of
+                    // the incomplete line.
+
+                    // Position returns the channel itself. It's not creating a new one.
+                    inputFileChannel.position(inputFileChannel.position() -
+                            (byteBuffer.capacity() - byteBuffer.limit()));// Seek back the difference
                 }
 
-                System.out.printf("Reader: read %d lines in %.2f seconds\n", lines.size(), (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
+                if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
+                    System.out.printf("Reader: read in %.2f seconds\n", (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
+                }
 
                 // If workers can't complete a batch in 20 seconds when we start to block
                 // something must've gone wrong.
-                queue.offer(lines, READER_TIMEOUT, TimeUnit.SECONDS);
-
-                charBuffer.clear();
+                queue.offer(byteBuffer, READER_TIMEOUT, TimeUnit.SECONDS);
             }
 
-            System.out.printf("Reader: finished at %.2f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
+            if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
+                System.out.printf("Reader: finished at %.2f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
+            }
         } catch (IOException ex) {
             System.err.println("Reader: error reading file");
 
@@ -236,49 +129,199 @@ public class CalculateAverage_ShannonChristie {
         }
     }
 
+    private static ArrayList<HashMap<String, StationReport>> startWorkerThreads(LinkedBlockingQueue<ByteBuffer> queue) {
+        CountDownLatch threadProcessingCompletionLatch = new CountDownLatch(cores);
+
+        ArrayList<HashMap<String, StationReport>> inProgressReports = new ArrayList<>(cores);
+
+        for (int threadI = 0; threadI < cores; threadI++) {
+            inProgressReports.add(new HashMap<>());
+
+            final int THREAD_INDEX = threadI;
+
+            Thread t = new Thread(() -> {
+                HashMap<String, StationReport> threadSpecificReport = inProgressReports.get(THREAD_INDEX);
+
+                try {
+                    while (true) {
+                        // If this takes more than 4 seconds, we either finished or something went wrong
+                        ByteBuffer buffer = queue.poll(WORKER_TIMEOUT, TimeUnit.SECONDS);
+
+                        if (buffer == null) {
+                            if (LOG_LEVEL.ordinal() <= LogLevel.WARNING.ordinal()) {
+                                System.out.printf("Thread %d: no more data\n", THREAD_INDEX);
+                            }
+
+                            if (!readerHasFinished) {
+                                if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
+                                    System.err.printf("Thread %d: reader hadn't finished\\n", THREAD_INDEX);
+                                }
+
+                                throw new RuntimeException(String.format("Thread %d: no more data yet reader hadn't finished", THREAD_INDEX));
+                            }
+
+                            break;
+                        }
+
+                        if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
+                            System.out.printf("Thread %d: got work item\n", THREAD_INDEX);
+                        }
+
+                        Instant workerStart = Instant.now();
+
+                        int lastIndex = 0;
+                        int delimiterIndex = 0;
+                        for (int i = 0; i < buffer.limit(); i++) {
+                            // Walk through, track the most recent delimiter, and the last
+                            // successful new lines end index.
+                            try {
+                                if (buffer.get(i) == ';') {
+                                    delimiterIndex = i; // Track delimiter
+                                } else if (buffer.get(i) == '\n') { // Got a new line
+                                    // We expect that all lines are valid in terms of having
+                                    // a station name and a temperature.
+                                    String stationName = getStationNameString(delimiterIndex, lastIndex, buffer);
+                                    double temperature = getTemperatureDouble(buffer, delimiterIndex, i);
+
+                                    StationReport report = threadSpecificReport
+                                            .computeIfAbsent(stationName, StationReport::new);
+
+                                    report.sum = (report.sum + temperature);
+                                    report.count = (report.count + 1);
+                                    report.max = (Math.max(report.max, temperature));
+                                    report.min = (Math.min(report.min, temperature));
+
+                                    lastIndex = i + 1;
+                                }
+                            } catch (NumberFormatException e) {
+                                System.err.printf("Error parsing temperature in line: %s\n",
+                                        buffer.slice(lastIndex, i).toString());
+                            }
+                        }
+
+                        if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
+                            System.out.printf("Worker %d: completed work item in %.2f seconds\n", THREAD_INDEX, (Instant.now().toEpochMilli() - workerStart.toEpochMilli()) / 1000.0);
+                        }
+                    }
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                } finally {
+                    // We completed all of our data, or something else went wrong
+                    threadProcessingCompletionLatch.countDown();
+                }
+            });
+
+            t.start();
+        }
+
+        if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
+            System.out.printf("All threads spawned. %d threads\n", cores);
+        }
+
+        try {
+            if (!threadProcessingCompletionLatch.await(180, TimeUnit.SECONDS)) {
+                throw new RuntimeException("Timed out waiting for thread processing completion.");
+            }
+        } catch (InterruptedException e) {
+            System.err.println("Interrupted while waiting for thread processing completion");
+
+            throw new RuntimeException(e);
+        }
+
+        return inProgressReports;
+    }
+
+    private static String getStationNameString(int delimiterIndex, int lastIndex, ByteBuffer buffer) {
+        int length = delimiterIndex - lastIndex;
+
+        char[] charArrayBuffer = new char[length];
+
+        for (int j = 0; j < length; j++) {
+            charArrayBuffer[j] = (char) buffer.get(lastIndex + j);
+        }
+
+        return String.valueOf(charArrayBuffer);
+    }
+
+    private static double getTemperatureDouble(ByteBuffer buffer, int delimiterIndex, int i) {
+        double temperature = 0;
+        boolean negative = false;
+        ByteBuffer temperatureBuffer = buffer.slice(delimiterIndex + 1, i - delimiterIndex - 1);
+        for (int j = 0; j < temperatureBuffer.limit(); j++) {
+            byte value = temperatureBuffer.get(j);
+            if (value == '.') {
+                continue;
+            }
+
+            if (value == '-') {
+                negative = true;
+
+                continue;
+            }
+
+            temperature = temperature * 10 + (value - '0');
+        }
+
+        if (negative) {
+            temperature = -temperature;
+        }
+
+        return temperature / 10;
+    }
+
+    private static void processAndOutputReports(ArrayList<HashMap<String, StationReport>> inProgressReports) {
+        if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
+            System.out.println("Processing the data");
+        }
+
+        HashMap<String, StationReport> reports = new HashMap<>(10_000);
+
+        inProgressReports.forEach((threadMap) -> {
+            if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
+                System.out.println("Got thread map, processing");
+            }
+
+            threadMap.forEach((ignored, report) -> {
+                StationReport station = reports.get(report.stationName);
+
+                if (station == null) {
+                    station = new StationReport(report.stationName);
+
+                    reports.put(station.stationName, station);
+                }
+
+                station.sum = (station.sum + report.sum);
+                station.count = (station.count + report.count);
+                station.max = (Math.max(station.max, report.max));
+                station.min = (Math.min(station.min, report.min));
+            });
+        });
+
+        if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
+            System.out.println("Processed, about to output now.");
+        }
+
+        reports.forEach((stationName, report) ->
+            System.out.printf("%s=%.2f/%.2f/%.2f\n", stationName, report.min, report.sum / report.count, report.max));
+
+        System.out.printf("Took %.4f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
+    }
+
     public static class StationReport {
         private final String stationName;
-        private double min, sum, max;
+        private double min = 99.9, sum, max = -99.9;
         private int count;
 
         public StationReport(String stationName) {
             this.stationName = stationName;
         }
+    }
 
-        public String getStationName() {
-            return stationName;
-        }
-
-        public double getMin() {
-            return min;
-        }
-
-        public void setMin(double min) {
-            this.min = min;
-        }
-
-        public double getMax() {
-            return max;
-        }
-
-        public void setMax(double max) {
-            this.max = max;
-        }
-
-        public int getCount() {
-            return count;
-        }
-
-        public void setCount(int count) {
-            this.count = count;
-        }
-
-        public double getSum() {
-            return sum;
-        }
-
-        public void setSum(double sum) {
-            this.sum = sum;
-        }
+    public enum LogLevel {
+        TRACE,
+        INFO,
+        WARNING,
+        ERROR,
+        NONE,
     }
 }
