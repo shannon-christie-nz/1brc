@@ -262,18 +262,25 @@ public class CalculateAverage_ShannonChristie {
     }
 
     private static double getTemperatureDouble(ByteBuffer buffer, int delimiterIndex, int i) {
-        double temperature = 0;
-        boolean negative = false;
-        ByteBuffer temperatureBuffer = buffer.slice(delimiterIndex + 1, i - delimiterIndex - 1);
-        for (int j = 0; j < temperatureBuffer.limit(); j++) {
-            byte value = temperatureBuffer.get(j);
+        int temperature = 0;
+        boolean negative;
+        int start;
+        int length;
+
+        if (buffer.get(delimiterIndex + 1) == '-') {
+            negative = true;
+            start = delimiterIndex + 2;
+            length = i - delimiterIndex - 2;
+        } else {
+            negative = false;
+            start = delimiterIndex + 1;
+            length = i - delimiterIndex - 1;
+        }
+
+        for (int j = 0; j < length; j++) {
+            byte value = buffer.get(start + j);
+
             if (value == '.') {
-                continue;
-            }
-
-            if (value == '-') {
-                negative = true;
-
                 continue;
             }
 
@@ -284,7 +291,7 @@ public class CalculateAverage_ShannonChristie {
             temperature = -temperature;
         }
 
-        return temperature / 10;
+        return temperature / 10.0;
     }
 
     private static void processAndOutputReports(ArrayList<HashMap<String, StationReport>> inProgressReports) {
