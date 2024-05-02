@@ -1,7 +1,11 @@
 package dev.morling.onebrc;
 
+import jdk.incubator.vector.*;
+
 import java.io.IOException;
+import java.lang.foreign.MemorySegment;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -169,33 +173,96 @@ public class CalculateAverage_ShannonChristie {
 
                         Instant workerStart = Instant.now();
 
-                        int lastIndex = 0;
-                        int delimiterIndex = 0;
-                        for (int i = 0; i < buffer.limit(); i++) {
+                        VectorShape shape = VectorShape.preferredShape();
+                        VectorSpecies<Byte> species = shape.withLanes(byte.class);
+                        Vector<Byte> bufferAsVector = species.fromMemorySegment(MemorySegment.ofBuffer(buffer.rewind()), 0, ByteOrder.BIG_ENDIAN);
+                        Vector<Byte> delimiterAsVector = bufferAsVector.broadcast(';');
+                        Vector<Byte> newlineAsVector = bufferAsVector.broadcast('\n');
+
+                        int lastNewlineIndex = 0;
+                        int lastDelimiterIndex = 0;
+                        for (int i = 0; i < bufferAsVector.length(); i += species.length()) {
                             // Walk through, track the most recent delimiter, and the last
                             // successful new lines end index.
                             try {
-                                if (buffer.get(i) == ';') {
-                                    delimiterIndex = i; // Track delimiter
-                                } else if (buffer.get(i) == '\n') { // Got a new line
-                                    // We expect that all lines are valid in terms of having
-                                    // a station name and a temperature.
-                                    String stationName = getStationNameString(delimiterIndex, lastIndex, buffer);
-                                    double temperature = getTemperatureDouble(buffer, delimiterIndex, i);
+                                VectorMask<Byte> delimiterEqualityMask = bufferAsVector.eq(delimiterAsVector);
+                                VectorMask<Byte> newlineEqualityMask = bufferAsVector.eq(newlineAsVector);
 
-                                    StationReport report = threadSpecificReport
-                                            .computeIfAbsent(stationName, StationReport::new);
+                                if (delimiterEqualityMask.trueCount() == 1 && newlineEqualityMask.anyTrue()) {
+                                    // Handles
+                                    // a1. completing a started line (no delimiter), and starts a new one (no delimiter)
+                                    // b2. completing an in-progress line (has delimiter), and finds a new in-progress line (has delimiter)
+                                    // b3. completing an in-progress line (has delimiter), completing a new line (whole), and the start of a new one (no delimiter)
+                                    //
+                                    // Does not handle
+                                    // a2. completing a started line (no delimiter), and finds a new in-progress line (has delimiter)
+                                    // a3. completing a started line (no delimiter), completing a new line (whole), and the start of a new line (no delimiter)
+                                    // a4. completing a started line (no delimiter), completing a new line (whole), and finds a new in-progress line (has delimiter)
+                                    // a5. completing a started line (no delimiter), completing a new line (whole) x 2, and the start of a new line (no delimiter)
+                                    // a6. completing a started line (no delimiter), completing a new line (whole) x 2, and finds a new in-progress line (has delimiter)
+                                    // b1. completing an in-progress line (has delimiter), and stars a new one (no delimiter)
+                                    // b4. completing an in-progress line (has delimiter), completing a new line (whole), and finds a new in-progress line (has delimiter)
+                                    // b5. completing an in-progress line (has delimiter), completing a new line (whole) x 2, and the start of a new one (no delimiter)
+                                    // b6. completing an in-progress line (has delimiter), completing a new line (whole) x 2, and a new in-progress line (has delimiter)
 
-                                    report.sum = (report.sum + temperature);
-                                    report.count = (report.count + 1);
-                                    report.max = (Math.max(report.max, temperature));
-                                    report.min = (Math.min(report.min, temperature));
+                                    int delimiterIndex = delimiterEqualityMask.firstTrue();
+                                    int newlineIndex = newlineEqualityMask.firstTrue();
 
-                                    lastIndex = i + 1;
+                                    if (newlineIndex > delimiterIndex) { //** Handles a1. **//
+                                        // Must have had a "line" start in prev/current iteration
+                                        // found a delimiter in this iteration, and an ending new line.
+                                        // i.e. we found a complete line and no new delimiter.
+                                        parseRangeAsLine(
+                                                buffer,
+                                                lastNewlineIndex,
+                                                i + delimiterIndex,
+                                                i + newlineIndex,
+                                                threadSpecificReport
+                                        );
+
+                                        // We completed that line, slide the index forward
+                                        lastNewlineIndex = i + newlineIndex + 1;
+                                    } else { //** Handles b1. and b2. **//
+                                        // We had to get a line start and its delimiter in the previous iteration.
+                                        // Now we've found the end of it.
+                                        parseRangeAsLine(
+                                                buffer,
+                                                lastNewlineIndex,
+                                                lastDelimiterIndex,
+                                                i + newlineIndex,
+                                                threadSpecificReport
+                                        );
+
+                                        // We completed that line, slide the index forward
+                                        lastNewlineIndex = i + newlineIndex + 1;
+
+                                        // Get last new line--never more than 2 or we'd be guaranteed to have more than 1 delimiter
+                                        if (newlineEqualityMask.trueCount() != 2) { //** Handles end of b1. **//
+                                            // This new line is incomplete so just track delimiter for next iteration
+                                            lastDelimiterIndex = i + delimiterIndex;
+                                        } else { //** Handles b2. **//
+                                            // We found another complete line
+                                            newlineIndex = newlineEqualityMask.lastTrue();
+
+                                            parseRangeAsLine(
+                                                    buffer,
+                                                    lastNewlineIndex,
+                                                    i + delimiterIndex,
+                                                    i + newlineIndex,
+                                                    threadSpecificReport
+                                            );
+
+                                            // We completed that line, slide the index forward
+                                            lastNewlineIndex = i + newlineIndex + 1;
+                                        }
+                                    }
+                                } else if (newlineEqualityMask.trueCount() == 1) {
+                                    // Handles
+                                    // a. completing an in-progress line
                                 }
                             } catch (NumberFormatException e) {
                                 System.err.printf("Error parsing temperature in line: %s\n",
-                                        buffer.slice(lastIndex, i).toString());
+                                        buffer.slice(lastNewlineIndex, i).toString());
                             }
                         }
 
@@ -231,7 +298,22 @@ public class CalculateAverage_ShannonChristie {
         return inProgressReports;
     }
 
-    private static String getStationNameString(int delimiterIndex, int lastIndex, ByteBuffer buffer) {
+    private static void parseRangeAsLine(ByteBuffer buffer, int start, int delimiter, int end, HashMap<String, StationReport> threadSpecificReport) {
+        // We expect that all lines are valid in terms of having
+        // a station name and a temperature.
+        String stationName = getStationNameString(buffer, start, delimiter);
+        double temperature = getTemperatureDouble(buffer, delimiter, end);
+
+        StationReport report = threadSpecificReport
+                .computeIfAbsent(stationName, StationReport::new);
+
+        report.sum = (report.sum + temperature);
+        report.count = (report.count + 1);
+        report.max = (Math.max(report.max, temperature));
+        report.min = (Math.min(report.min, temperature));
+    }
+
+    private static String getStationNameString(ByteBuffer buffer, int lastIndex, int delimiterIndex) {
         int length = delimiterIndex - lastIndex;
 
         char[] charArrayBuffer = new char[length];
