@@ -44,6 +44,7 @@ import java.util.concurrent.TimeUnit;
  * 96dcc26897a0a771afd369b493074bb1f4dbcdb4 - 1r15w. "". Took ~12 seconds.
  * c235e14351eb2d8f701dbf208e89fe50c4ecca14 - "". Disable most logging. Took ~12 seconds.
  * 192bd37501fc9067b8bd7df9fd7667af8c7daa39 - "". Replace computeIfAbsent with manual map population. Took ~11 seconds (10.5~)
+ * 78563dee4182d9ae17d773f4daeb7b3dcf9ad07f - "". Refactor to "read" once. Took ~10 seconds.
  * */
 public class CalculateAverage_ShannonChristie {
     private static volatile boolean readerHasFinished = false;
