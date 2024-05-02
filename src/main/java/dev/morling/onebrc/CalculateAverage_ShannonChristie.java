@@ -178,15 +178,18 @@ public class CalculateAverage_ShannonChristie {
 
                         Instant workerStart = Instant.now();
 
+                        final int bufferLimit = buffer.limit();
                         int lastIndex = 0;
                         int delimiterIndex = 0;
-                        for (int i = 0; i < buffer.limit(); i++) {
+                        for (int i = 0; i < bufferLimit; i++) {
                             // Walk through, track the most recent delimiter, and the last
                             // successful new lines end index.
                             try {
-                                if (buffer.get(i) == ';') {
+                                byte currentByte = buffer.get(i);
+
+                                if (currentByte == ';') {
                                     delimiterIndex = i; // Track delimiter
-                                } else if (buffer.get(i) == '\n') { // Got a new line
+                                } else if (currentByte == '\n') { // Got a new line
                                     // We expect that all lines are valid in terms of having
                                     // a station name and a temperature.
                                     String stationName = getStationNameString(delimiterIndex, lastIndex, buffer);
