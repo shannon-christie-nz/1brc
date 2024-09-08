@@ -100,8 +100,8 @@ public class CalculateAverage_ShannonChristie {
     private static void readMeasurementsToQueue(LinkedBlockingQueue<ByteBuffer> queue, CountDownLatch completionLatch) {
         try (FileChannel inputFileChannel =
                      FileChannel.open(Path.of("./measurements.txt"), StandardOpenOption.READ)) {
-            ByteBuffer byteBuffer;
-            while (inputFileChannel.read(byteBuffer = ByteBuffer.allocate(BUFFER_SIZE)) != -1) {
+            ByteBuffer byteBuffer = ByteBuffer.allocate(BUFFER_SIZE);
+            while (inputFileChannel.read(byteBuffer) != -1) {
                 Instant readerStart = Instant.now();
 
                 // Let's read backwards to find the last complete line
@@ -132,6 +132,9 @@ public class CalculateAverage_ShannonChristie {
                 // If workers can't complete a batch in 20 seconds when we start to block
                 // something must've gone wrong.
 //                queue.offer(byteBuffer, READER_TIMEOUT, TimeUnit.SECONDS);
+
+                byteBuffer.position(0);
+                byteBuffer.limit(byteBuffer.capacity());
             }
 
             if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
