@@ -1,3 +1,18 @@
+/*
+ *  Copyright 2023 The original authors
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
 package dev.morling.onebrc;
 
 import java.io.IOException;
@@ -65,15 +80,15 @@ public class CalculateAverage_ShannonChristie {
     //////////////////////////
     private static final int cores = Math.max(1, Math.min(Runtime.getRuntime().availableProcessors(), 15));
 
-    public static void main() {
+    public static void main(String[] args) throws Exception {
         LinkedBlockingQueue<ByteBuffer> queue = new LinkedBlockingQueue<>(cores);
 
         startReaderThread(queue);
 
-//        ArrayList<HashMap<String, StationReport>> inProgressReports =
-//                startWorkerThreads(queue);
-//
-//        processAndOutputReports(inProgressReports);
+        // ArrayList<HashMap<String, StationReport>> inProgressReports =
+        // startWorkerThreads(queue);
+        //
+        // processAndOutputReports(inProgressReports);
 
         System.out.printf("Took %.4f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
     }
@@ -81,8 +96,7 @@ public class CalculateAverage_ShannonChristie {
     private static void startReaderThread(LinkedBlockingQueue<ByteBuffer> queue) {
         CountDownLatch threadProcessingCompletionLatch = new CountDownLatch(1);
 
-        Thread readerThread = new Thread(() ->
-            readMeasurementsToQueue(queue, threadProcessingCompletionLatch));
+        Thread readerThread = new Thread(() -> readMeasurementsToQueue(queue, threadProcessingCompletionLatch));
 
         readerThread.start();
 
@@ -92,20 +106,21 @@ public class CalculateAverage_ShannonChristie {
 
         try {
             threadProcessingCompletionLatch.await();
-        } catch (InterruptedException e) {
+        }
+        catch (InterruptedException e) {
 
         }
     }
 
     private static void readMeasurementsToQueue(LinkedBlockingQueue<ByteBuffer> queue, CountDownLatch completionLatch) {
-        try (FileChannel inputFileChannel =
-                     FileChannel.open(Path.of("./measurements.txt"), StandardOpenOption.READ)) {
+        try (FileChannel inputFileChannel = FileChannel.open(Path.of("./measurements.txt"), StandardOpenOption.READ)) {
             ByteBuffer byteBuffer = ByteBuffer.allocate(BUFFER_SIZE);
-            while (inputFileChannel.read(byteBuffer) != -1) {
+            int readInBytes = 0;
+            while ((readInBytes = inputFileChannel.read(byteBuffer)) != -1) {
                 Instant readerStart = Instant.now();
 
                 // Let's read backwards to find the last complete line
-                for (int i = 0; i < 100; i++) {
+                for (int i = 0; i < BUFFER_SIZE; i++) {
                     int readIndex = byteBuffer.capacity() - i;
 
                     if (byteBuffer.get(readIndex - 1) == '\n') {
@@ -131,7 +146,11 @@ public class CalculateAverage_ShannonChristie {
 
                 // If workers can't complete a batch in 20 seconds when we start to block
                 // something must've gone wrong.
-//                queue.offer(byteBuffer, READER_TIMEOUT, TimeUnit.SECONDS);
+                // queue.offer(byteBuffer, READER_TIMEOUT, TimeUnit.SECONDS);
+
+                if (readInBytes < BUFFER_SIZE) {
+                    break;
+                }
 
                 byteBuffer.position(0);
                 byteBuffer.limit(byteBuffer.capacity());
@@ -140,15 +159,17 @@ public class CalculateAverage_ShannonChristie {
             if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
                 System.out.printf("Reader: finished at %.2f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
             }
-        } catch (IOException ex) {
+        }
+        catch (IOException ex) {
             System.err.println("Reader: error reading file");
 
             System.err.println(ex.getMessage());
-//        } catch (InterruptedException ex) {
-//            System.err.println("Reader: workers couldn't process fast enough, we timed out at 20 seconds");
-//
-//            System.err.println(ex.getMessage());
-        } finally {
+            // } catch (InterruptedException ex) {
+            // System.err.println("Reader: workers couldn't process fast enough, we timed out at 20 seconds");
+            //
+            // System.err.println(ex.getMessage());
+        }
+        finally {
             readerHasFinished = true;
             completionLatch.countDown();
         }
@@ -205,7 +226,8 @@ public class CalculateAverage_ShannonChristie {
 
                                 if (currentByte == ';') {
                                     delimiterIndex = i; // Track delimiter
-                                } else if (currentByte == '\n') { // Got a new line
+                                }
+                                else if (currentByte == '\n') { // Got a new line
                                     // We expect that all lines are valid in terms of having
                                     // a station name and a temperature.
                                     String stationName = getStationNameString(delimiterIndex, lastIndex, buffer);
@@ -226,19 +248,23 @@ public class CalculateAverage_ShannonChristie {
 
                                     lastIndex = i + 1;
                                 }
-                            } catch (NumberFormatException e) {
+                            }
+                            catch (NumberFormatException e) {
                                 System.err.printf("Error parsing temperature in line: %s\n",
                                         buffer.slice(lastIndex, i).toString());
                             }
                         }
 
                         if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
-                            System.out.printf("Worker %d: completed work item in %.2f seconds\n", THREAD_INDEX, (Instant.now().toEpochMilli() - workerStart.toEpochMilli()) / 1000.0);
+                            System.out.printf("Worker %d: completed work item in %.2f seconds\n", THREAD_INDEX,
+                                    (Instant.now().toEpochMilli() - workerStart.toEpochMilli()) / 1000.0);
                         }
                     }
-                } catch (InterruptedException e) {
+                }
+                catch (InterruptedException e) {
                     throw new RuntimeException(e);
-                } finally {
+                }
+                finally {
                     // We completed all of our data, or something else went wrong
                     threadProcessingCompletionLatch.countDown();
                 }
@@ -255,7 +281,8 @@ public class CalculateAverage_ShannonChristie {
             if (!threadProcessingCompletionLatch.await(180, TimeUnit.SECONDS)) {
                 throw new RuntimeException("Timed out waiting for thread processing completion.");
             }
-        } catch (InterruptedException e) {
+        }
+        catch (InterruptedException e) {
             System.err.println("Interrupted while waiting for thread processing completion");
 
             throw new RuntimeException(e);
@@ -286,7 +313,8 @@ public class CalculateAverage_ShannonChristie {
             negative = true;
             start = delimiterIndex + 2;
             length = i - delimiterIndex - 2;
-        } else {
+        }
+        else {
             negative = false;
             start = delimiterIndex + 1;
             length = i - delimiterIndex - 1;
@@ -341,8 +369,7 @@ public class CalculateAverage_ShannonChristie {
             System.out.println("Processed, about to output now.");
         }
 
-        reports.forEach((stationName, report) ->
-            System.out.printf("%s=%.2f/%.2f/%.2f\n", stationName, report.min, report.sum / report.count, report.max));
+        reports.forEach((stationName, report) -> System.out.printf("%s=%.2f/%.2f/%.2f\n", stationName, report.min, report.sum / report.count, report.max));
     }
 
     public static class StationReport {
