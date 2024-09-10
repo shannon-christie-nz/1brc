@@ -109,12 +109,29 @@ public class CalculateAverage_ShannonChristie {
 
     private static void readMeasurementsToQueue(AtomicRingBuffer queue) {
         try (FileChannel inputFileChannel = FileChannel.open(Path.of("./measurements.txt"), StandardOpenOption.READ)) {
+            final int MAX_RETRIES = 1000;
+            int retries = 0;
             int readInBytes = 0;
             while (true) {
                 Instant readerStart = Instant.now();
 
-                try (var byteBufferGuard = queue.getBuffer().lock()) {
+                var lockedBuffer = queue.getBuffer();
+                if (lockedBuffer == null) {
+                    if (retries++ >= MAX_RETRIES) {
+                        break;
+                    }
+
+                    continue;
+                }
+
+                retries = 0;
+
+                try (var byteBufferGuard = lockedBuffer.lock()) {
                     var byteBuffer = byteBufferGuard.buffer();
+                    // Ensure we reset buffers after they may have been used
+                    byteBuffer.position(0);
+                    byteBuffer.limit(byteBuffer.capacity());
+                    
                     readInBytes = inputFileChannel.read(byteBuffer);
 
                     // Let's read backwards to find the last complete line
@@ -408,7 +425,8 @@ public class CalculateAverage_ShannonChristie {
          */
         public LockedBuffer getBuffer() {
             var consumerCurrent = consumerIndex.getAcquire();
-            var newIndex = producerIndex.getAcquire() + 1;
+            var producerCurrent = producerIndex.getAcquire();
+            var newIndex = producerCurrent + 1;
 
             if (newIndex >= maxSize) { // Wrap if reaching boundary
                 newIndex = 0;
@@ -418,7 +436,7 @@ public class CalculateAverage_ShannonChristie {
                 return null;
             }
 
-            if (newIndex != consumerIndex.compareAndExchangeAcquire(newIndex - 1, newIndex)) {
+            if (producerCurrent != producerIndex.compareAndExchangeAcquire(producerCurrent, newIndex)) {
                 return null; // Failed to acquire new index
             }
 
@@ -439,17 +457,18 @@ public class CalculateAverage_ShannonChristie {
          */
         public LockedBuffer getItem() {
             var producerCurrent = producerIndex.getAcquire();
-            var newIndex = consumerIndex.getAcquire() + 1;
+            var consumerCurrent = consumerIndex.getAcquire();
+            var newIndex = consumerCurrent + 1;
 
             if (newIndex >= maxSize) { // Wrap if reaching boundary
                 newIndex = 0;
             }
 
-            if (newIndex == producerCurrent) { // Stop if index matches, no work
+            if (consumerCurrent == producerCurrent || newIndex == producerCurrent) { // Stop if index matches, no work
                 return null;
             }
 
-            if (newIndex != consumerIndex.compareAndExchangeAcquire(newIndex - 1, newIndex)) {
+            if (consumerCurrent != consumerIndex.compareAndExchangeAcquire(consumerCurrent, newIndex)) {
                 return null; // Failed to acquire new index
             }
 
