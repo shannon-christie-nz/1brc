@@ -455,14 +455,33 @@ public class CalculateAverage_ShannonChristie {
             this.lock = new ReentrantLock();
         }
 
-        public ByteBuffer get() {
+        public LockedBufferGuard get() {
             this.lock.lock();
 
-            return this.buffer;
+            return new LockedBufferGuard(this, buffer);
         }
 
-        public void release() {
+        private void release() {
             this.lock.unlock();
+        }
+
+        public static class LockedBufferGuard implements AutoCloseable {
+            private final LockedBuffer guarded;
+            private final ByteBuffer buffer;
+
+            private LockedBufferGuard(LockedBuffer guarded, ByteBuffer buffer) {
+                this.guarded = guarded;
+                this.buffer = buffer;
+            }
+
+            public ByteBuffer buffer() {
+                return buffer;
+            }
+
+            @Override
+            public void close() {
+                this.guarded.release();
+            }
         }
     }
 
