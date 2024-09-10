@@ -388,15 +388,62 @@ public class CalculateAverage_ShannonChristie {
     }
 
     public static class AtomicRingBuffer {
-        private AtomicInteger producerIndex;
-        private AtomicInteger consumerIndex;
-        private List<LockedBuffer> buffers;
+        private final AtomicInteger producerIndex;
+        private final AtomicInteger consumerIndex;
+        private final List<LockedBuffer> buffers;
+        private final int maxSize;
 
         public AtomicRingBuffer(List<LockedBuffer> buffers) {
+            this.producerIndex = new AtomicInteger(0);
+            this.consumerIndex = new AtomicInteger(0);
+
             this.buffers = buffers;
+            this.maxSize = buffers.size();
         }
 
+        public LockedBuffer getBuffer() {
+            var consumerCurrent = consumerIndex.getAcquire();
+            var newIndex = producerIndex.getAcquire() + 1;
 
+            if (newIndex >= maxSize) { // Wrap if reaching boundary
+                newIndex = 0;
+            }
+
+            if (newIndex == consumerCurrent) { // Stop if index matches, no room
+                return null;
+            }
+
+            if (newIndex != consumerIndex.compareAndExchangeAcquire(newIndex - 1, newIndex)) {
+                return null; // Failed to acquire new index
+            }
+
+            return this.buffers.get(newIndex);
+        }
+
+        public void readyItem() {
+            var newIndex = producerIndex.getAcquire() + 1;
+
+            producerIndex.compareAndExchangeAcquire(newIndex - 1, newIndex);
+        }
+
+        public LockedBuffer getItem() {
+            var producerCurrent = producerIndex.getAcquire();
+            var newIndex = consumerIndex.getAcquire() + 1;
+
+            if (newIndex >= maxSize) { // Wrap if reaching boundary
+                newIndex = 0;
+            }
+
+            if (newIndex == producerCurrent) { // Stop if index matches, no work
+                return null;
+            }
+
+            if (newIndex != consumerIndex.compareAndExchangeAcquire(newIndex - 1, newIndex)) {
+                return null; // Failed to acquire new index
+            }
+
+            return this.buffers.get(newIndex); // Return item, we got it
+        }
     }
 
     public static class LockedBuffer {
