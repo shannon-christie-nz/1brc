@@ -113,7 +113,7 @@ public class CalculateAverage_ShannonChristie {
             while (true) {
                 Instant readerStart = Instant.now();
 
-                try (var byteBufferGuard = queue.getBuffer().get()) {
+                try (var byteBufferGuard = queue.getBuffer().lock()) {
                     var byteBuffer = byteBufferGuard.buffer();
                     readInBytes = inputFileChannel.read(byteBuffer);
 
@@ -203,7 +203,7 @@ public class CalculateAverage_ShannonChristie {
 
                         Instant workerStart = Instant.now();
 
-                        try (var bufferGuard = lockedBuffer.get()) {
+                        try (var bufferGuard = lockedBuffer.lock()) {
                             var buffer = bufferGuard.buffer();
 
                             final int bufferLimit = buffer.limit();
@@ -371,6 +371,20 @@ public class CalculateAverage_ShannonChristie {
         }
     }
 
+    /**
+     * AtomicRingBuffer provides a mostly lockless ring buffer.
+     * 
+     * Much of the behaviour for getting the next valid buffer
+     * from both the consumer and producer utilises atomics,
+     * avoiding excessive locking. 
+     * 
+     * However, the access to the buffer itself is guarded. 
+     * This guarding will at most be between the producer and 
+     * a single consumer. Thus keeping the lock contention to 
+     * minimum.
+     * 
+     * NOTE this is intended for single producer, multiple consumer.
+     */
     public static class AtomicRingBuffer {
         private final AtomicInteger producerIndex;
         private final AtomicInteger consumerIndex;
@@ -385,6 +399,13 @@ public class CalculateAverage_ShannonChristie {
             this.maxSize = buffers.size();
         }
 
+        /**
+         * Gets the next valid buffer for use by the producer.
+         * 
+         * You must call readyItem when complete.
+         * 
+         * @return
+         */
         public LockedBuffer getBuffer() {
             var consumerCurrent = consumerIndex.getAcquire();
             var newIndex = producerIndex.getAcquire() + 1;
@@ -404,12 +425,18 @@ public class CalculateAverage_ShannonChristie {
             return this.buffers.get(newIndex);
         }
 
+        /** Readies an item for consumers */
         public void readyItem() {
             var newIndex = producerIndex.getAcquire() + 1;
 
             producerIndex.compareAndExchangeAcquire(newIndex - 1, newIndex);
         }
 
+        /**
+         * Gets the next readied item for consumption.
+         * 
+         * @return
+         */
         public LockedBuffer getItem() {
             var producerCurrent = producerIndex.getAcquire();
             var newIndex = consumerIndex.getAcquire() + 1;
@@ -430,6 +457,15 @@ public class CalculateAverage_ShannonChristie {
         }
     }
 
+    /**
+     * LockedBuffer is a "mutex" protected buffer.
+     * 
+     * After obtaining an instance of LockedBuffer,
+     * you must call the `lock()` method to acquire
+     * the lock and buffer via a LockedBufferGuard.
+     * 
+     * @see LockedBufferGuard
+     */
     public static class LockedBuffer {
         private ByteBuffer buffer;
         private Lock lock;
@@ -439,16 +475,35 @@ public class CalculateAverage_ShannonChristie {
             this.lock = new ReentrantLock();
         }
 
-        public LockedBufferGuard get() {
+        /**
+         * Acquires the lock and returns the guard.
+         * 
+         * Best used within a try with resources.
+         * 
+         * @return
+         */
+        public LockedBufferGuard lock() {
             this.lock.lock();
 
             return new LockedBufferGuard(this, buffer);
         }
 
+        /**
+         * Release will be called by LockedBufferGuard
+         */
         private void release() {
             this.lock.unlock();
         }
 
+        /**
+         * LockedBufferGuard is best used in a try
+         * with resources block as it implements
+         * AutoCloseable to help release the lock.
+         * 
+         * Call `buffer()` to get the buffer.
+         * 
+         * DO NOT USE THE BUFFER AFTER CLOSING.
+         */
         public static class LockedBufferGuard implements AutoCloseable {
             private final LockedBuffer guarded;
             private final ByteBuffer buffer;
@@ -459,6 +514,9 @@ public class CalculateAverage_ShannonChristie {
             }
 
             public ByteBuffer buffer() {
+                // Ideally we track if this lock has been released.
+                // For example, someone called `close()` manually.
+                // That should prevent further reading of this buffer.
                 return buffer;
             }
 
