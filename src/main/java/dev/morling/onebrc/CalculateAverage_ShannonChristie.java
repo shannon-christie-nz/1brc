@@ -23,9 +23,13 @@ import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.atomic.*;
 
 /*
  * Everything is run on the exact same measurements.txt
@@ -114,7 +118,8 @@ public class CalculateAverage_ShannonChristie {
 
     private static void readMeasurementsToQueue(LinkedBlockingQueue<ByteBuffer> queue, CountDownLatch completionLatch) {
         try (FileChannel inputFileChannel = FileChannel.open(Path.of("./measurements.txt"), StandardOpenOption.READ)) {
-            ByteBuffer byteBuffer = ByteBuffer.allocate(BUFFER_SIZE);
+            long numberOfBuffers = inputFileChannel.size() / Integer.MAX_VALUE;
+            ByteBuffer byteBuffer = ByteBuffer.allocate(Integer.MAX_VALUE);
             int readInBytes = 0;
             while ((readInBytes = inputFileChannel.read(byteBuffer)) != -1) {
                 Instant readerStart = Instant.now();
@@ -379,6 +384,38 @@ public class CalculateAverage_ShannonChristie {
 
         public StationReport(String stationName) {
             this.stationName = stationName;
+        }
+    }
+
+    public static class AtomicRingBuffer {
+        private AtomicInteger producerIndex;
+        private AtomicInteger consumerIndex;
+        private List<LockedBuffer> buffers;
+
+        public AtomicRingBuffer(List<LockedBuffer> buffers) {
+            this.buffers = buffers;
+        }
+
+
+    }
+
+    public static class LockedBuffer {
+        private ByteBuffer buffer;
+        private Lock lock;
+
+        public LockedBuffer(int bufferSize) {
+            this.buffer = ByteBuffer.allocate(bufferSize);
+            this.lock = new ReentrantLock();
+        }
+
+        public ByteBuffer get() {
+            this.lock.lock();
+
+            return this.buffer;
+        }
+
+        public void release() {
+            this.lock.unlock();
         }
     }
 
