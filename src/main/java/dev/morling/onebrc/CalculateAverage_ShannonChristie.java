@@ -25,7 +25,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -75,8 +74,6 @@ public class CalculateAverage_ShannonChristie {
     /// Configuration ///
     /////////////////////
     private static final int BUFFER_SIZE = 10_000_000;
-    private static final int READER_TIMEOUT = 2;
-    private static final int WORKER_TIMEOUT = 1;
     private static final LogLevel LOG_LEVEL = LogLevel.NONE;
 
     //////////////////////////
@@ -85,80 +82,71 @@ public class CalculateAverage_ShannonChristie {
     private static final int cores = Math.max(1, Math.min(Runtime.getRuntime().availableProcessors(), 15));
 
     public static void main(String[] args) throws Exception {
-        LinkedBlockingQueue<ByteBuffer> queue = new LinkedBlockingQueue<>(cores);
+        List<LockedBuffer> buffers = new ArrayList<LockedBuffer>(cores);
+        for (int i = 0; i < cores; i++) {
+            buffers.add(new LockedBuffer(BUFFER_SIZE));
+        }
+        AtomicRingBuffer queue = new AtomicRingBuffer(buffers);
 
         startReaderThread(queue);
 
-        // ArrayList<HashMap<String, StationReport>> inProgressReports =
-        // startWorkerThreads(queue);
-        //
-        // processAndOutputReports(inProgressReports);
+        ArrayList<HashMap<String, StationReport>> inProgressReports = startWorkerThreads(queue);
+        
+        processAndOutputReports(inProgressReports);
 
         System.out.printf("Took %.4f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
     }
 
-    private static void startReaderThread(LinkedBlockingQueue<ByteBuffer> queue) {
-        CountDownLatch threadProcessingCompletionLatch = new CountDownLatch(1);
-
-        Thread readerThread = new Thread(() -> readMeasurementsToQueue(queue, threadProcessingCompletionLatch));
+    private static void startReaderThread(AtomicRingBuffer queue) {
+        Thread readerThread = new Thread(() -> readMeasurementsToQueue(queue));
 
         readerThread.start();
 
         if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
             System.out.println("Reader thread started");
         }
-
-        try {
-            threadProcessingCompletionLatch.await();
-        }
-        catch (InterruptedException e) {
-
-        }
     }
 
-    private static void readMeasurementsToQueue(LinkedBlockingQueue<ByteBuffer> queue, CountDownLatch completionLatch) {
+    private static void readMeasurementsToQueue(AtomicRingBuffer queue) {
         try (FileChannel inputFileChannel = FileChannel.open(Path.of("./measurements.txt"), StandardOpenOption.READ)) {
-            long numberOfBuffers = inputFileChannel.size() / Integer.MAX_VALUE;
-            ByteBuffer byteBuffer = ByteBuffer.allocate(Integer.MAX_VALUE);
             int readInBytes = 0;
-            while ((readInBytes = inputFileChannel.read(byteBuffer)) != -1) {
+            while (true) {
                 Instant readerStart = Instant.now();
 
-                // Let's read backwards to find the last complete line
-                for (int i = 0; i < BUFFER_SIZE; i++) {
-                    int readIndex = byteBuffer.capacity() - i;
+                try (var byteBufferGuard = queue.getBuffer().get()) {
+                    var byteBuffer = byteBufferGuard.buffer();
+                    readInBytes = inputFileChannel.read(byteBuffer);
 
-                    if (byteBuffer.get(readIndex - 1) == '\n') {
-                        byteBuffer.limit(readIndex); // Reduce limit to last valid line
-
-                        break; // We can move on now.
+                    // Let's read backwards to find the last complete line
+                    for (int i = byteBuffer.capacity(); i > 0; i--) {
+    
+                        if (byteBuffer.get(i - 1) == '\n') {
+                            byteBuffer.limit(i); // Reduce limit to last valid line
+    
+                            break; // We can move on now.
+                        }
+                    }
+    
+                    if (byteBuffer.limit() != byteBuffer.capacity()) {
+                        // We didn't complete a line, we need to track this change for ensuring
+                        // the next read works as intended... i.e. continuing at the start of
+                        // the incomplete line.
+    
+                        // Position returns the channel itself. It's not creating a new one.
+                        inputFileChannel.position(inputFileChannel.position() -
+                                (byteBuffer.capacity() - byteBuffer.limit()));// Seek back the difference
+                    }
+    
+                    if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
+                        System.out.printf("Reader: read in %.2f seconds\n", (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
+                    }
+    
+                    queue.readyItem();
+    
+                    if (readInBytes < BUFFER_SIZE) {
+                        break;
                     }
                 }
-
-                if (byteBuffer.limit() != byteBuffer.capacity()) {
-                    // We didn't complete a line, we need to track this change for ensuring
-                    // the next read works as intended... i.e. continuing at the start of
-                    // the incomplete line.
-
-                    // Position returns the channel itself. It's not creating a new one.
-                    inputFileChannel.position(inputFileChannel.position() -
-                            (byteBuffer.capacity() - byteBuffer.limit()));// Seek back the difference
-                }
-
-                if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
-                    System.out.printf("Reader: read in %.2f seconds\n", (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
-                }
-
-                // If workers can't complete a batch in 20 seconds when we start to block
-                // something must've gone wrong.
-                // queue.offer(byteBuffer, READER_TIMEOUT, TimeUnit.SECONDS);
-
-                if (readInBytes < BUFFER_SIZE) {
-                    break;
-                }
-
-                byteBuffer.position(0);
-                byteBuffer.limit(byteBuffer.capacity());
             }
 
             if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
@@ -176,11 +164,10 @@ public class CalculateAverage_ShannonChristie {
         }
         finally {
             readerHasFinished = true;
-            completionLatch.countDown();
         }
     }
 
-    private static ArrayList<HashMap<String, StationReport>> startWorkerThreads(LinkedBlockingQueue<ByteBuffer> queue) {
+    private static ArrayList<HashMap<String, StationReport>> startWorkerThreads(AtomicRingBuffer queue) {
         CountDownLatch threadProcessingCompletionLatch = new CountDownLatch(cores);
 
         ArrayList<HashMap<String, StationReport>> inProgressReports = new ArrayList<>(cores);
@@ -195,24 +182,20 @@ public class CalculateAverage_ShannonChristie {
 
                 try {
                     while (true) {
-                        // If this takes more than 4 seconds, we either finished or something went wrong
-                        ByteBuffer buffer = queue.poll(WORKER_TIMEOUT, TimeUnit.SECONDS);
+                        LockedBuffer lockedBuffer = queue.getItem();
 
-                        if (buffer == null) {
+                        if (lockedBuffer == null) {
                             if (LOG_LEVEL.ordinal() <= LogLevel.WARNING.ordinal()) {
-                                System.out.printf("Thread %d: no more data\n", THREAD_INDEX);
+                                System.out.printf("Thread %d: failed to get data\n", THREAD_INDEX);
                             }
 
-                            if (!readerHasFinished) {
-                                if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
-                                    System.err.printf("Thread %d: reader hadn't finished\\n", THREAD_INDEX);
-                                }
-
-                                throw new RuntimeException(String.format("Thread %d: no more data yet reader hadn't finished", THREAD_INDEX));
+                            if (readerHasFinished) {
+                                break;
                             }
 
-                            break;
+                            continue;
                         }
+
 
                         if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
                             System.out.printf("Thread %d: got work item\n", THREAD_INDEX);
@@ -220,43 +203,47 @@ public class CalculateAverage_ShannonChristie {
 
                         Instant workerStart = Instant.now();
 
-                        final int bufferLimit = buffer.limit();
-                        int lastIndex = 0;
-                        int delimiterIndex = 0;
-                        for (int i = 0; i < bufferLimit; i++) {
-                            // Walk through, track the most recent delimiter, and the last
-                            // successful new lines end index.
-                            try {
-                                byte currentByte = buffer.get(i);
+                        try (var bufferGuard = lockedBuffer.get()) {
+                            var buffer = bufferGuard.buffer();
 
-                                if (currentByte == ';') {
-                                    delimiterIndex = i; // Track delimiter
-                                }
-                                else if (currentByte == '\n') { // Got a new line
-                                    // We expect that all lines are valid in terms of having
-                                    // a station name and a temperature.
-                                    String stationName = getStationNameString(delimiterIndex, lastIndex, buffer);
-                                    double temperature = getTemperatureDouble(buffer, delimiterIndex, i);
+                            final int bufferLimit = buffer.limit();
+                            int lastIndex = 0;
+                            int delimiterIndex = 0;
+                            for (int i = 0; i < bufferLimit; i++) {
+                                // Walk through, track the most recent delimiter, and the last
+                                // successful new lines end index.
+                                try {
+                                    byte currentByte = buffer.get(i);
 
-                                    StationReport report = threadSpecificReport.get(stationName);
-
-                                    if (report == null) {
-                                        report = new StationReport(stationName);
-
-                                        threadSpecificReport.put(stationName, report);
+                                    if (currentByte == ';') {
+                                        delimiterIndex = i; // Track delimiter
                                     }
+                                    else if (currentByte == '\n') { // Got a new line
+                                        // We expect that all lines are valid in terms of having
+                                        // a station name and a temperature.
+                                        String stationName = getStationNameString(delimiterIndex, lastIndex, buffer);
+                                        double temperature = getTemperatureDouble(buffer, delimiterIndex, i);
 
-                                    report.sum = (report.sum + temperature);
-                                    report.count = (report.count + 1);
-                                    report.max = (Math.max(report.max, temperature));
-                                    report.min = (Math.min(report.min, temperature));
+                                        StationReport report = threadSpecificReport.get(stationName);
 
-                                    lastIndex = i + 1;
+                                        if (report == null) {
+                                            report = new StationReport(stationName);
+
+                                            threadSpecificReport.put(stationName, report);
+                                        }
+
+                                        report.sum = (report.sum + temperature);
+                                        report.count = (report.count + 1);
+                                        report.max = (Math.max(report.max, temperature));
+                                        report.min = (Math.min(report.min, temperature));
+
+                                        lastIndex = i + 1;
+                                    }
                                 }
-                            }
-                            catch (NumberFormatException e) {
-                                System.err.printf("Error parsing temperature in line: %s\n",
-                                        buffer.slice(lastIndex, i).toString());
+                                catch (NumberFormatException e) {
+                                    System.err.printf("Error parsing temperature in line: %s\n",
+                                            buffer.slice(lastIndex, i).toString());
+                                }
                             }
                         }
 
@@ -265,9 +252,6 @@ public class CalculateAverage_ShannonChristie {
                                     (Instant.now().toEpochMilli() - workerStart.toEpochMilli()) / 1000.0);
                         }
                     }
-                }
-                catch (InterruptedException e) {
-                    throw new RuntimeException(e);
                 }
                 finally {
                     // We completed all of our data, or something else went wrong
