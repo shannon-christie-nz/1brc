@@ -407,11 +407,11 @@ public class CalculateAverage_ShannonChristie {
         private final int maxSize;
 
         public AtomicRingBuffer(List<LockedBuffer> buffers) {
-            this.producerIndex = new AtomicInteger(0);
-            this.consumerIndex = new AtomicInteger(0);
-
             this.buffers = buffers;
             this.maxSize = buffers.size();
+            
+            this.producerIndex = new AtomicInteger(0);
+            this.consumerIndex = new AtomicInteger(this.maxSize);
         }
 
         /**
