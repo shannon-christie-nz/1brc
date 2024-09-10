@@ -91,7 +91,7 @@ public class CalculateAverage_ShannonChristie {
         startReaderThread(queue);
 
         ArrayList<HashMap<String, StationReport>> inProgressReports = startWorkerThreads(queue);
-        
+
         processAndOutputReports(inProgressReports);
 
         System.out.printf("Took %.4f\n", (Instant.now().toEpochMilli() - start.toEpochMilli()) / 1000.0);
@@ -131,35 +131,34 @@ public class CalculateAverage_ShannonChristie {
                     // Ensure we reset buffers after they may have been used
                     byteBuffer.position(0);
                     byteBuffer.limit(byteBuffer.capacity());
-                    
+
                     readInBytes = inputFileChannel.read(byteBuffer);
 
                     // Let's read backwards to find the last complete line
                     for (int i = byteBuffer.capacity(); i > 0; i--) {
-    
                         if (byteBuffer.get(i - 1) == '\n') {
                             byteBuffer.limit(i); // Reduce limit to last valid line
-    
+
                             break; // We can move on now.
                         }
                     }
-    
+
                     if (byteBuffer.limit() != byteBuffer.capacity()) {
                         // We didn't complete a line, we need to track this change for ensuring
                         // the next read works as intended... i.e. continuing at the start of
                         // the incomplete line.
-    
+
                         // Position returns the channel itself. It's not creating a new one.
                         inputFileChannel.position(inputFileChannel.position() -
                                 (byteBuffer.capacity() - byteBuffer.limit()));// Seek back the difference
                     }
-    
+
                     if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
                         System.out.printf("Reader: read in %.2f seconds\n", (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
                     }
-    
+
                     queue.readyItem();
-    
+
                     if (readInBytes < BUFFER_SIZE) {
                         break;
                     }
@@ -212,7 +211,6 @@ public class CalculateAverage_ShannonChristie {
 
                             continue;
                         }
-
 
                         if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
                             System.out.printf("Thread %d: got work item\n", THREAD_INDEX);
@@ -445,9 +443,14 @@ public class CalculateAverage_ShannonChristie {
 
         /** Readies an item for consumers */
         public void readyItem() {
-            var newIndex = producerIndex.getAcquire() + 1;
+            var producerCurrent = producerIndex.getAcquire();
+            var newIndex = producerCurrent + 1;
 
-            producerIndex.compareAndExchangeAcquire(newIndex - 1, newIndex);
+            if (newIndex >= maxSize) { // Wrap if reaching boundary
+                newIndex = 0;
+            }
+
+            producerIndex.compareAndExchangeAcquire(producerCurrent, newIndex);
         }
 
         /**
@@ -464,7 +467,7 @@ public class CalculateAverage_ShannonChristie {
                 newIndex = 0;
             }
 
-            if (consumerCurrent == producerCurrent || newIndex == producerCurrent) { // Stop if index matches, no work
+            if (newIndex == producerCurrent) { // Stop if index matches, no work
                 return null;
             }
 
