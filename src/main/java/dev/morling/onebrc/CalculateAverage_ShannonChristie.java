@@ -155,7 +155,7 @@ public class CalculateAverage_ShannonChristie {
                     }
 
                     if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
-                        System.out.printf("Reader: read in %.2f seconds\n", (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
+                        System.out.printf("Reader: read in %.4f seconds\n", (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
                     }
 
                     queue.readyItem();
@@ -178,10 +178,6 @@ public class CalculateAverage_ShannonChristie {
             System.err.println("Reader: error reading file");
 
             System.err.println(ex.getMessage());
-            // } catch (InterruptedException ex) {
-            // System.err.println("Reader: workers couldn't process fast enough, we timed out at 20 seconds");
-            //
-            // System.err.println(ex.getMessage());
         }
         finally {
             readerHasFinished = true;
