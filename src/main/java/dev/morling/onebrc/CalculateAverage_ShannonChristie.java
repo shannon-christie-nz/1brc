@@ -64,6 +64,7 @@ import java.util.concurrent.atomic.*;
  * 192bd37501fc9067b8bd7df9fd7667af8c7daa39 - "". Replace computeIfAbsent with manual map population. Took ~11 seconds (10.5~)
  * 78563dee4182d9ae17d773f4daeb7b3dcf9ad07f - "". Refactor to "read" once. Took ~10 seconds.
  * 3523b10358c9bf5864e6866efeefdb79062a9b04 - "". Refactor getTemperatureDouble. Took ~10 seconds.
+ * 45d48f1bac7dc60e27ccb8a8d42e49d68025445d - AtomicRingBuffer. Took 9.8970, 9.9030, 8.7180, 8.9950, 9.1340 seconds.
  * */
 public class CalculateAverage_ShannonChristie {
     private static volatile boolean readerHasFinished = false;
