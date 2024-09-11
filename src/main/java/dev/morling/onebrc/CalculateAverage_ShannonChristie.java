@@ -74,7 +74,7 @@ public class CalculateAverage_ShannonChristie {
     /// Configuration ///
     /////////////////////
     private static final int BUFFER_SIZE = 10_000_000;
-    private static final LogLevel LOG_LEVEL = LogLevel.NONE;
+    private static final LogLevel LOG_LEVEL = LogLevel.INFO;
 
     //////////////////////////
     /// Auto-configuration ///
@@ -98,7 +98,7 @@ public class CalculateAverage_ShannonChristie {
     }
 
     private static void startReaderThread(AtomicRingBuffer queue) {
-        Thread readerThread = new Thread(() -> readMeasurementsToQueue(queue));
+        Thread readerThread = new Thread(() -> readMeasurementsToQueue(queue), "Reader-1");
 
         readerThread.start();
 
@@ -153,13 +153,17 @@ public class CalculateAverage_ShannonChristie {
                                 (byteBuffer.capacity() - byteBuffer.limit()));// Seek back the difference
                     }
 
-                    if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
+                    if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
                         System.out.printf("Reader: read in %.2f seconds\n", (Instant.now().toEpochMilli() - readerStart.toEpochMilli()) / 1000.0);
                     }
 
                     queue.readyItem();
 
                     if (readInBytes < BUFFER_SIZE) {
+                        if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
+                            System.out.printf("Reader: finished read at %d\n", inputFileChannel.position());
+                        }
+
                         break;
                     }
                 }
@@ -201,11 +205,15 @@ public class CalculateAverage_ShannonChristie {
                         LockedBuffer lockedBuffer = queue.getItem();
 
                         if (lockedBuffer == null) {
-                            if (LOG_LEVEL.ordinal() <= LogLevel.WARNING.ordinal()) {
+                            if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
                                 System.out.printf("Thread %d: failed to get data\n", THREAD_INDEX);
                             }
 
                             if (readerHasFinished) {
+                                if (LOG_LEVEL.ordinal() <= LogLevel.ERROR.ordinal()) {
+                                    System.out.printf("Thread %d: leaving\n", THREAD_INDEX);
+                                }
+
                                 break;
                             }
 
@@ -272,12 +280,12 @@ public class CalculateAverage_ShannonChristie {
                     // We completed all of our data, or something else went wrong
                     threadProcessingCompletionLatch.countDown();
                 }
-            });
+            }, "Worker-" + THREAD_INDEX);
 
             t.start();
         }
 
-        if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
+        if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
             System.out.printf("All threads spawned. %d threads\n", cores);
         }
 
@@ -342,7 +350,7 @@ public class CalculateAverage_ShannonChristie {
     }
 
     private static void processAndOutputReports(ArrayList<HashMap<String, StationReport>> inProgressReports) {
-        if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
+        if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
             System.out.println("Processing the data");
         }
 
@@ -369,7 +377,7 @@ public class CalculateAverage_ShannonChristie {
             });
         });
 
-        if (LOG_LEVEL.ordinal() <= LogLevel.TRACE.ordinal()) {
+        if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
             System.out.println("Processed, about to output now.");
         }
 
