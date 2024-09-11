@@ -437,16 +437,6 @@ public class CalculateAverage_ShannonChristie {
                 return null;
             }
 
-            var newIndex = producerCurrent + 1;
-
-            if (newIndex >= maxSize) { // Wrap if reaching boundary
-                newIndex = 0;
-            }
-
-            if (producerCurrent != producerIndex.compareAndExchangeAcquire(producerCurrent, newIndex)) {
-                return null; // Failed to acquire new index
-            }
-
             return this.buffers.get(producerCurrent);
         }
 
@@ -499,6 +489,7 @@ public class CalculateAverage_ShannonChristie {
      */
     public static class LockedBuffer {
         private static int counter = 0;
+        private static final LogLevel LOG_LEVEL = LogLevel.NONE;
 
         private ByteBuffer buffer;
         private Lock lock;
@@ -518,11 +509,15 @@ public class CalculateAverage_ShannonChristie {
          * @return
          */
         public LockedBufferGuard lock() {
-            System.out.printf("Thread %s: acquiring lock %d\n", Thread.currentThread().getName(), lockId);
+            if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
+                System.out.printf("Thread %s: acquiring lock %d\n", Thread.currentThread().getName(), lockId);
+            }
 
             this.lock.lock();
 
-            System.out.printf("Thread %s: acquired lock %d\n", Thread.currentThread().getName(), lockId);
+            if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
+                System.out.printf("Thread %s: acquired lock %d\n", Thread.currentThread().getName(), lockId);
+            }
 
             return new LockedBufferGuard(this, buffer);
         }
@@ -531,7 +526,9 @@ public class CalculateAverage_ShannonChristie {
          * Release will be called by LockedBufferGuard
          */
         private void release() {
-            System.out.printf("Thread %s: releasing lock %d\n", Thread.currentThread().getName(), lockId);
+            if (LOG_LEVEL.ordinal() <= LogLevel.INFO.ordinal()) {
+                System.out.printf("Thread %s: releasing lock %d\n", Thread.currentThread().getName(), lockId);
+            }
 
             this.lock.unlock();
         }
