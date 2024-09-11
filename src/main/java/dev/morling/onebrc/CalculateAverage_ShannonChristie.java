@@ -98,7 +98,7 @@ public class CalculateAverage_ShannonChristie {
     }
 
     private static void startReaderThread(AtomicRingBuffer queue) {
-        Thread readerThread = new Thread(() -> readMeasurementsToQueue(queue), "Reader-1");
+        Thread readerThread = new Thread(() -> readMeasurementsToQueue(queue), "Reader-0");
 
         readerThread.start();
 
@@ -432,21 +432,22 @@ public class CalculateAverage_ShannonChristie {
         public LockedBuffer getBuffer() {
             var consumerCurrent = consumerIndex.getAcquire();
             var producerCurrent = producerIndex.getAcquire();
+
+            if (producerCurrent == consumerCurrent) { // Stop if index matches, no room
+                return null;
+            }
+
             var newIndex = producerCurrent + 1;
 
             if (newIndex >= maxSize) { // Wrap if reaching boundary
                 newIndex = 0;
             }
 
-            if (newIndex == consumerCurrent) { // Stop if index matches, no room
-                return null;
-            }
-
             if (producerCurrent != producerIndex.compareAndExchangeAcquire(producerCurrent, newIndex)) {
                 return null; // Failed to acquire new index
             }
 
-            return this.buffers.get(newIndex);
+            return this.buffers.get(producerCurrent);
         }
 
         /** Readies an item for consumers */
@@ -497,8 +498,12 @@ public class CalculateAverage_ShannonChristie {
      * @see LockedBufferGuard
      */
     public static class LockedBuffer {
+        private static int counter = 0;
+
         private ByteBuffer buffer;
         private Lock lock;
+
+        private int lockId = LockedBuffer.counter++;
 
         public LockedBuffer(int bufferSize) {
             this.buffer = ByteBuffer.allocate(bufferSize);
@@ -513,7 +518,11 @@ public class CalculateAverage_ShannonChristie {
          * @return
          */
         public LockedBufferGuard lock() {
+            System.out.printf("Thread %s: acquiring lock %d\n", Thread.currentThread().getName(), lockId);
+
             this.lock.lock();
+
+            System.out.printf("Thread %s: acquired lock %d\n", Thread.currentThread().getName(), lockId);
 
             return new LockedBufferGuard(this, buffer);
         }
@@ -522,6 +531,8 @@ public class CalculateAverage_ShannonChristie {
          * Release will be called by LockedBufferGuard
          */
         private void release() {
+            System.out.printf("Thread %s: releasing lock %d\n", Thread.currentThread().getName(), lockId);
+
             this.lock.unlock();
         }
 
