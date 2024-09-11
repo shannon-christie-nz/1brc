@@ -80,10 +80,11 @@ public class CalculateAverage_ShannonChristie {
     /// Auto-configuration ///
     //////////////////////////
     private static final int cores = Math.max(1, Math.min(Runtime.getRuntime().availableProcessors(), 15));
+    private static final int BUFFERS_COUNT = cores * 3;
 
     public static void main(String[] args) throws Exception {
-        List<LockedBuffer> buffers = new ArrayList<LockedBuffer>(cores);
-        for (int i = 0; i < cores; i++) {
+        List<LockedBuffer> buffers = new ArrayList<LockedBuffer>(BUFFERS_COUNT);
+        for (int i = 0; i < BUFFERS_COUNT; i++) {
             buffers.add(new LockedBuffer(BUFFER_SIZE));
         }
         AtomicRingBuffer queue = new AtomicRingBuffer(buffers);
