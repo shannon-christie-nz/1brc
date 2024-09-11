@@ -65,6 +65,7 @@ import java.util.concurrent.atomic.*;
  * 78563dee4182d9ae17d773f4daeb7b3dcf9ad07f - "". Refactor to "read" once. Took ~10 seconds.
  * 3523b10358c9bf5864e6866efeefdb79062a9b04 - "". Refactor getTemperatureDouble. Took ~10 seconds.
  * 45d48f1bac7dc60e27ccb8a8d42e49d68025445d - AtomicRingBuffer. Took 9.8970, 9.9030, 8.7180, 8.9950, 9.1340 seconds.
+ *  - AtomicRingBuffer. Allocate DirectBuffer. Took 8.6450, 8.6380, 8.5820, 8.6130 seconds.
  * */
 public class CalculateAverage_ShannonChristie {
     private static volatile boolean readerHasFinished = false;
@@ -495,7 +496,7 @@ public class CalculateAverage_ShannonChristie {
         private int lockId = LockedBuffer.counter++;
 
         public LockedBuffer(int bufferSize) {
-            this.buffer = ByteBuffer.allocate(bufferSize);
+            this.buffer = ByteBuffer.allocateDirect(bufferSize);
             this.lock = new ReentrantLock();
         }
 
